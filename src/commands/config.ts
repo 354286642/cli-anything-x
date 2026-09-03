@@ -209,14 +209,14 @@ export function registerConfigCommands(program: Command): void {
       }
 
       setProjectConfig(answers.name, {
-        ...(gatewayUrl ? { baseUrl: gatewayUrl } : {}),
         prefix: answers.prefix,
         tenantId: answers.tenantId,
         extTenantId: answers.extTenantId,
+        // 不写 baseUrl：默认走 Profile 网关（getGatewayUrl 兜底）；仅当项目需独立网关时才用 config set 补 baseUrl
       });
 
       success(`业务模块 "${answers.name}" 配置已保存！(Profile: ${resolveProfileName()})`);
-      info(`网关: ${gatewayUrl}`);
+      info(`网关: ${gatewayUrl}（项目默认使用，无需重复配置 baseUrl）`);
       info(`请求前缀: ${answers.prefix}`);
       info(`请求示例: ${gatewayUrl}/${answers.prefix}/api/...`);
 

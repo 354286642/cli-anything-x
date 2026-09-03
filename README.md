@@ -81,29 +81,31 @@ anycli config set workspace /path/to/workspace   # 或 export ANYCLI_WORKSPACE=/
   "workspace": "C:\\code\\my-data",                  # 可选：指定其他目录为工作目录（团队/私有数据仓形态）
   "profiles": {
     "test": {                                        # Profile 名，切换环境即切换 Profile
-      "env": "test",                                 # 环境标识
-      "gatewayUrl": "https://api.example.com",       # 网关地址（整个 Profile 一份）
+      "env": "test",                                 # 环境标识 test | prod | dev
+      "gatewayUrl": "https://api.example.com",       # 网关地址（整个 Profile 一份，项目默认请求基址）
       "loginUrl": "https://login.example.com",       # 浏览器授权登录页地址
       "sessionId": "xxx",                            # session-id 凭证（auth login 写入，勿手填）
+      "sessionUpdatedAt": 1788396782368,             # 凭证刷新时间戳（毫秒，auth refresh 自动写入，勿手填）
       "auth": {
         "type": "session-id",                        # 授权方式：session-id | bearer-token（整套一套，跟随 Profile）
         "token": "xxx",                              # bearer-token 凭证（仅 bearer-token 方式用）
         "refreshUrl": "https://api.example.com/user/refresh",  # 凭证刷新接口（必须完整 URL，不配置则不自动刷新）
         "refreshIntervalMs": 28800000,               # 刷新间隔（毫秒，8 小时 = 28800000）
-        "extraHeaders": {                            # 可选：刷新接口需要的静态请求头（如租户头）
+        "extraHeaders": {                            # 可选：仅【刷新接口】用的静态请求头（如租户头）
           "x-tenant-id": "demo-service"
         }
       },
       "projects": {                                  # 业务系统接入
         "demo": {
-          "baseUrl": "https://api.example.com",      # 项目请求基址
-          "prefix": "demo-service",                  # 网关路由前缀
+          "prefix": "demo-service",                  # 网关路由前缀（请求 URL = 网关 + / + prefix + 路径）
           "auth": {
-            "extraHeaders": {                        # 可选：每次请求附加的静态请求头（如多租户标识）
+            "extraHeaders": {                        # 可选：每次【业务请求】附加的静态请求头（如多租户标识）
               "x-tenant-id": "demo-service",
               "x-ext-tenant-id": "demo-service"
             }
           }
+          # 一般不写 baseUrl：默认走 Profile gatewayUrl；仅当项目需独立网关/直连独立服务时才写
+          # "baseUrl": "https://gateway.example.com"
         }
       }
     }
@@ -111,16 +113,23 @@ anycli config set workspace /path/to/workspace   # 或 export ANYCLI_WORKSPACE=/
 }
 ```
 
+**请求基址与 URL 拼接**
+
+- 项目请求 URL 统一为：`网关 + / + prefix + 路径`（如 `https://api.example.com/demo-service/api/order/list`）。
+- 网关默认取 Profile 级 `gatewayUrl`（整个环境一份，所有项目共用）；`config add-project` 不会重复写入 `baseUrl`。
+- 项目级 `baseUrl` 是**可选覆盖**：仅当某个项目不跟大部队走同一个网关（如直连独立服务、on-prem 内网地址）时才写，未写时自动用 `gatewayUrl`。
+
 **授权方式与凭证**
 
 - 整个 CLI 只保留一套授权（session-id / bearer-token），跟随当前 Profile 环境，不按项目细分。
-- 用 `anycli auth login` 选择授权方式并写入凭证；也可 `anycli config set auth-type session-id|bearer-token` 切换。
-- 凭证自动刷新：`auth.refreshUrl`（必须完整 URL，含协议与域名）与间隔 `auth.refreshIntervalMs` 由用户自填；刷新接口返回体约定 `{ success, data: { sessionId | token } }`。
+- 用 `anycli auth login` 选择授权方式并写入凭证（`sessionId` / `auth.token`）；也可 `anycli config set auth-type session-id|bearer-token` 切换。
+- 凭证自动刷新：`auth.refreshUrl`（必须完整 URL，含协议与域名）与间隔 `auth.refreshIntervalMs` 由用户自填；刷新接口返回体约定 `{ success, data: { sessionId | token } }`。刷新成功后 `sessionUpdatedAt` 会自动写入最近刷新时间戳。
 
-**项目请求头**
+**请求头（两个 extraHeaders 的区分）**
 
-- 多租户等静态请求头放项目 `auth.extraHeaders`（如 `x-tenant-id` / `x-ext-tenant-id`），框架不硬编码任何业务 Header。
-- 兼容遗留字段：项目顶层 `tenantId` / `extTenantId` 仍可读取，等价于 `extraHeaders` 里的 `x-tenant-id` / `x-ext-tenant-id`；新配置建议直接用 `extraHeaders`。
+- **项目 `auth.extraHeaders`**：每次**业务请求**附加的静态请求头（如多租户标识 `x-tenant-id` / `x-ext-tenant-id`），框架不硬编码任何业务 Header。
+- **`Profile.auth.extraHeaders`**：仅**凭证刷新接口**请求附加的静态请求头（如刷新接口也需要租户头时）；与业务请求无关。
+- 兼容遗留字段：项目顶层 `tenantId` / `extTenantId` 仍可读取，等价于项目 `extraHeaders` 里的 `x-tenant-id` / `x-ext-tenant-id`；新配置建议直接用 `extraHeaders`。
 
 **团队协作 / 私有数据仓**
 
