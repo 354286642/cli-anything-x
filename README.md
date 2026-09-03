@@ -1,6 +1,6 @@
 # CLI-Anything-X
 
-下一代企业数字化架构：系统CLI化、流程Skill化、员工Agent化
+从 Java 后端接口与参数一键生成可执行的 AI 技能（Skill），并支持把多个技能编排成业务流程（Flow）。还能用浏览器录制真实操作（Live Lens）自动产出流程型 Skill，让 AI 助手通过命令行直接调用你的业务系统、替你完成真实业务。
 
 ## 特性
 
@@ -34,6 +34,51 @@ anycli request cli-anything-x POST /api/example --body '{}'  # 调用业务接�
 ```
 
 > 已有项目添加接口：`anycli gen`；已有项目添加 Profile 配置：`anycli config add-project`
+
+## 框架与业务数据（Workspace）
+
+`cli-anything-x` 是**框架**：它本身不含任何业务数据。你的业务数据——接口注册表 `apis/`、AI Skill 与流程 `skills/`、专属命令 `src/projects/`——统一放在一个 **Workspace 目录**里，框架通过 Workspace 读取它们。
+
+```
+框架仓 cli-anything-x（公开）                    数据仓（私有，如你团队的数据仓）
+┌──────────────────────────────┐              ┌───────────────────────────────┐
+│ src/        框架代码          │   Workspace  │ workspace/apis/{project}/     │ 接口注册表
+│ skills/anycli   主入口        │  ──────────► │ workspace/skills/{project}/    │ Skill + 流程
+│ skills/demo     合成示例      │    指向      │ workspace/src/projects/        │ 专属命令
+│ LICENSE(MIT) / README        │              │ config/company.json            │ 公司默认配置
+└──────────────────────────────┘              └───────────────────────────────┘
+```
+
+**Workspace 解析优先级**：`ANYCLI_WORKSPACE` 环境变量 > `~/.anycli/config.json` 的 `workspace` 字段 > 框架包目录。
+
+> 框架作者的公司数据也采用此形态：业务数据放在独立私有仓，通过 Workspace 指向，与框架仓完全解耦。使用者可仿照此模式建自己的数据仓。
+
+### 新用户拉取代码后，如何创建与关联
+
+**方式一：开箱即用（体验）** —— 无需任何数据目录
+
+```bash
+npm install -g cli-anything-x     # 全局安装（skills/demo 合成示例随包发布）
+anycli skill install              # 安装框架自带的合成示例
+anycli skill list                 # 查看已安装技能
+```
+
+**方式二：本地自建数据目录（推荐）**
+
+```bash
+mkdir my-workspace && cd my-workspace && mkdir apis skills   # ① 创建数据目录
+anycli config set workspace "C:\path\to\my-workspace"        # ② 关联（写入 ~/.anycli/config.json）
+anycli init <project>                                        # ③ 一键接入业务系统，自动生成 apis/{project}/、skills/{project}/
+anycli skill install                                         # ④ 安装技能到 ~/.agents/skills/
+```
+
+CI/CD 场景可改用环境变量关联：`ANYCLI_WORKSPACE=C:\path\to\my-workspace`
+
+**方式三：团队协作 / 数据仓形态（推荐用于团队）**
+
+1. 建一个**私有数据仓**（如 `<你的数据仓名>`），把 Workspace 数据放进去（`workspace/apis/`、`workspace/skills/`、`config/`）。
+2. 克隆到本地，用 `ANYCLI_WORKSPACE` 指向它的 `workspace/` 目录（或 `anycli config set workspace`）。
+3. 框架仓保持干净（只含代码），业务数据在私有仓独立演进、独立权限，不随框架版本漂移。
 
 ## 文档
 
