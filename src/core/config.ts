@@ -1,4 +1,5 @@
 import Conf from 'conf';
+import { mkdirSync } from 'fs';
 import { extractSessionId } from './session.js';
 import { AnycliError, ErrorCode } from './errors.js';
 import { homedir } from 'os';
@@ -304,13 +305,16 @@ export function projectExists(projectName: string): boolean {
 
 /**
  * 解析数据工作区（apis/skills/flows 的根目录）。
- * 优先级：ANYCLI_WORKSPACE 环境变量 > ~/.anycli/config 的 workspace 字段 > 包内默认（向后兼容，测试依赖此行为）。
+ * 优先级：ANYCLI_WORKSPACE 环境变量 > ~/.anycli/config 的 workspace 字段 > ~/.anycli（默认，配置与产出统一）。
  */
 export function resolveWorkspace(): string {
   if (process.env.ANYCLI_WORKSPACE) return process.env.ANYCLI_WORKSPACE;
   const ws = store.get('workspace');
   if (typeof ws === 'string' && ws.trim()) return ws.trim();
-  return PACKAGE_ROOT;
+  // 默认工作目录 = ~/.anycli：配置与产出（apis/、skills/、src/projects/）统一存放，
+  // 使用者可直接把该目录纳入 git 管理。包内不再作为默认 workspace。
+  mkdirSync(CONFIG_DIR, { recursive: true });
+  return CONFIG_DIR;
 }
 
 export { CONFIG_DIR, store, PACKAGE_ROOT };

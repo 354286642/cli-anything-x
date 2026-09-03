@@ -4,15 +4,53 @@ import { join, dirname, relative } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { success, info, output, warn } from '../core/output.js';
+import { resolveWorkspace } from '../core/config.js';
 
 const AGENTS_SKILLS_DIR = join(homedir(), '.agents', 'skills');
 
 // 方案 B 之前的旧版扁平目录（{project}-{module}），安装/卸载时一并清理
 const LEGACY_FLAT_DIRS: string[] = [];
 
-function getProjectSkillsDir(): string {
+// 框架自带 skills（主入口 anycli、示例 demo）随包发布，位于安装目录内
+function getFrameworkSkillsDir(): string {
   const currentDir = dirname(fileURLToPath(import.meta.url));
   return join(currentDir, '..', '..', 'skills');
+}
+
+// 用户工作区 skills（默认 ~/.anycli/skills，可纳入 git 管理）
+function getWorkspaceSkillsDir(): string {
+  return join(resolveWorkspace(), 'skills');
+}
+
+// 安装/列出/卸载覆盖的 skills 目录：工作区优先、框架内置兜底，按路径去重
+function getAllSkillsDirs(): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const d of [getWorkspaceSkillsDir(), getFrameworkSkillsDir()]) {
+    const key = process.platform === 'win32' ? d.toLowerCase() : d;
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(d);
+    }
+  }
+  return out;
+}
+
+// 从多个 skills 目录收集顶层项目目录名，同名以先出现的（工作区）优先
+function collectProjectNames(skillsDirs: string[]): string[] {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  for (const skillsDir of skillsDirs) {
+    if (!existsSync(skillsDir)) continue;
+    for (const d of readdirSync(skillsDir, { withFileTypes: true })) {
+      if (!d.isDirectory()) continue;
+      if (!seen.has(d.name)) {
+        seen.add(d.name);
+        names.push(d.name);
+      }
+    }
+  }
+  return names;
 }
 
 interface SkillEntry {
@@ -78,26 +116,27 @@ export function registerSkillCommands(program: Command): void {
     .description('将 Skill 安装到 ~/.agents/skills/（供 AI Agent 发现）')
     .option('--force', '覆盖已有 Skill')
     .action((options: { force?: boolean }) => {
-      const skillsDir = getProjectSkillsDir();
-      if (!existsSync(skillsDir)) {
-        warn(`未找到 skills 目录: ${skillsDir}`);
-        return;
-      }
+      const skillsDirs = getAllSkillsDirs();
       if (!existsSync(AGENTS_SKILLS_DIR)) {
         mkdirSync(AGENTS_SKILLS_DIR, { recursive: true });
       }
 
       const legacyRemoved = cleanLegacyDirs();
 
-      // 顶层即项目目录（如 demo、anycli），整树递归拷贝，保留内部层级
-      const projectDirs = readdirSync(skillsDir, { withFileTypes: true })
-        .filter((d) => d.isDirectory())
-        .map((d) => d.name);
+      // 顶层即项目目录（如 demo、anycli、用户项目），整树递归拷贝，保留内部层级
+      const projectDirs = collectProjectNames(skillsDirs);
+      if (projectDirs.length === 0) {
+        warn('未找到 skills 目录（工作区与框架内置均无）');
+        return;
+      }
 
       let installed = 0;
       let skipped = 0;
       for (const name of projectDirs) {
-        const src = join(skillsDir, name);
+        // 同名项目以工作区技能为优先来源，其次框架内置
+        const src =
+          skillsDirs.map((s) => join(s, name)).find((p) => existsSync(p)) ??
+          join(skillsDirs[0], name);
         const dest = join(AGENTS_SKILLS_DIR, name);
         if (existsSync(dest) && !options.force) {
           skipped++;
@@ -124,8 +163,17 @@ export function registerSkillCommands(program: Command): void {
     .command('list')
     .description('查看 CLI-Anything-X 管理的 Skill 及安装状态')
     .action(() => {
-      const skillsDir = getProjectSkillsDir();
-      const entries = collectSkillEntries(skillsDir);
+      // 合并工作区与框架内置，同名以工作区（先出现的）优先
+      const entries: SkillEntry[] = [];
+      const seenRel = new Set<string>();
+      for (const skillsDir of getAllSkillsDirs()) {
+        for (const e of collectSkillEntries(skillsDir)) {
+          if (!seenRel.has(e.rel)) {
+            seenRel.add(e.rel);
+            entries.push(e);
+          }
+        }
+      }
       if (entries.length === 0) {
         info('未找到任何 Skill，请检查 skills 目录');
         return;
@@ -156,15 +204,11 @@ export function registerSkillCommands(program: Command): void {
     .command('uninstall')
     .description('卸载 CLI-Anything-X 相关 Skill')
     .action(() => {
-      const skillsDir = getProjectSkillsDir();
-      if (!existsSync(skillsDir)) {
+      const projectDirs = collectProjectNames(getAllSkillsDirs());
+      if (projectDirs.length === 0) {
         warn('未找到 skills 目录');
         return;
       }
-
-      const projectDirs = readdirSync(skillsDir, { withFileTypes: true })
-        .filter((d) => d.isDirectory())
-        .map((d) => d.name);
 
       let removed = 0;
       for (const name of projectDirs) {
