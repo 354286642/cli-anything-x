@@ -31,7 +31,7 @@ cd cli-anything-x && npm install && npm run build && npm link
 
 ```bash
 anycli config init          # 选择环境（默认正式）、输出格式
-anycli auth login           # 浏览器登录（成功后可一键开启每 8 小时定时刷新保活）
+anycli auth login           # 选择授权方式（session-id / bearer-token）并浏览器授权，可配置凭证自动刷新
 anycli init cli-anything-x   # 一键接入新业务系统（配置 + 注册表 + Skill 一步到位）
 anycli skill install        # 安装 Skill 到 ~/.agents/skills/
 anycli request cli-anything-x POST /api/example --body '{}'  # 调用业务接口
@@ -89,11 +89,13 @@ anycli config set workspace /path/to/workspace   # 或 export ANYCLI_WORKSPACE=/
 
 ```
 anycli
-├── auth                              # 认证管理
-│   ├── login [--session-id <id>]     # 登录
-│   ├── status                        # 登录状态
-│   ├── logout                        # 登出
-│   └── set-session <id>              # 设置 sessionId（CI/CD）
+├── auth                              # 认证管理（整个 CLI 一套，跟随 Profile）
+│   ├── login [--type session-id|bearer-token]  # 选择授权方式并浏览器授权
+│   ├── login --session-id <id> / --token <t>   # 直接设置凭证（CI/CD）
+│   ├── token [project]               # 交互输入 bearer-token（Profile 级；project 已废弃）
+│   ├── refresh                       # 手动触发一次凭证刷新（session-id / token）
+│   ├── scheduler install|uninstall   # 定时自动刷新（间隔取 Profile.auth.refreshIntervalMs）
+│   ├── status / logout               # 状态 / 登出
 │
 ├── config                            # 配置管理
 │   ├── init                          # 初始化配置

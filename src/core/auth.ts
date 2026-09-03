@@ -1,4 +1,4 @@
-import { getSessionId, setSessionId, getProjectConfig, getProfile, resolveAuthFromProjectConfig } from './config.js';
+import { getSessionId, setSessionId, getProjectConfig, getProfile, getProfileAuthConfig, getProfileToken } from './config.js';
 import type { AuthStrategyType } from './config.js';
 import { AnycliError, ErrorCode } from './errors.js';
 import type { AuthStrategy, AuthContext } from './auth/types.js';
@@ -48,14 +48,16 @@ export function requireProject(projectName: string) {
 }
 
 /**
- * 静默刷新本地凭证（session-id 策略）。
- * 遍历当前 Profile 下所有配置了 auth.refreshUrl 的 session-id 项目逐个尝试刷新，
- * 任一成功即返回新 sessionId；未配置任何可刷新项目时明确报错。
- * 是否启用自动刷新由项目配置决定（公司项目在私有配置中提供 refreshUrl 与 8h 间隔）。
+ * 静默刷新当前 Profile 的本地凭证（session-id / bearer-token 通用）。
+ * 使用 Profile.auth 的统一配置：refreshUrl 用户自填的刷新接口、refreshIntervalMs 刷新间隔。
+ * 返回新的凭证（sessionId 或 token）；刷新接口返回体约定 { success, data: { sessionId? | token? } }。
  */
-export async function refreshSessionId(): Promise<string> {
-  const sessionId = getSessionId();
-  if (!sessionId) {
+export async function refreshCredential(): Promise<string> {
+  const profile = getProfile();
+  const profileAuth = profile.auth || { type: 'session-id' as AuthStrategyType };
+  const isToken = profileAuth.type === 'bearer-token';
+  const credential = isToken ? profileAuth.token : getSessionId();
+  if (!credential) {
     throw new AnycliError(
       ErrorCode.AUTH_REQUIRED,
       '当前未登录，无法刷新，请先执行: anycli auth login',
@@ -63,39 +65,23 @@ export async function refreshSessionId(): Promise<string> {
     );
   }
 
-  const profile = getProfile();
-  const projects = Object.entries(profile.projects || {});
-  if (projects.length === 0) {
+  const auth = getProfileAuthConfig();
+  const strategy = getStrategy(auth.type);
+  if (!auth.refreshUrl || !strategy.refresh) {
     throw new AnycliError(
       ErrorCode.CONFIG_MISSING,
-      '当前 Profile 下未配置任何项目，无法刷新。请先运行: anycli init <project> 或 anycli config add-project'
+      '未配置凭证刷新接口（Profile.auth.refreshUrl），无法自动刷新，请检查配置',
+      'anycli config set auth.refresh-url <url>'
     );
   }
 
-  let attempted = 0;
-  for (const [project, projectConfig] of projects) {
-    const auth = resolveAuthFromProjectConfig(projectConfig);
-    if (auth.type !== 'session-id') continue;
-    const strategy = getStrategy(auth.type);
-    if (!auth.refreshUrl || !strategy.refresh) continue;
-
-    attempted++;
-    const ctx: AuthContext = { project, auth, profile };
-    const ok = await strategy.refresh(ctx);
-    if (ok) return getSessionId();
-  }
-
-  if (attempted === 0) {
-    throw new AnycliError(
-      ErrorCode.CONFIG_MISSING,
-      '未配置任何可自动刷新的项目（需在项目配置中设置 auth.refreshUrl），请检查配置',
-      'anycli config'
-    );
-  }
+  const ctx: AuthContext = { project: '', auth, profile };
+  const ok = await strategy.refresh(ctx);
+  if (ok) return isToken ? getProfileToken() : getSessionId();
 
   throw new AnycliError(
     ErrorCode.AUTH_EXPIRED,
-    '刷新失败：原 Session 已失效或刷新接口未返回新的 sessionId，请重新登录',
+    '刷新失败：原凭证已失效或刷新接口未返回新的凭证，请重新登录',
     'anycli auth login'
   );
 }

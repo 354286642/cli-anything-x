@@ -126,18 +126,20 @@ triggers:
 ## 成功标准
 ```
 
-## 认证（所有项目共用）
+## 认证（整个 CLI 一套，跟随 Profile）
 
-认证采用可插拔的 AuthStrategy，按项目在配置中指定类型；内置 `session-id` 与 `bearer-token` 两种，
-后续可扩展 oauth2 / api-key 等。
+认证采用可插拔的 AuthStrategy，**整个 CLI 一套授权方式（session-id / bearer-token），跟随 Profile（环境）配置，不按项目细分**；
+后续可扩展 oauth2 / api-key 等。授权方式由 `anycli auth login` 选择，也可 `anycli config set auth-type` 切换。
 
 ### 登录
 
 ```bash
-anycli auth login                    # 交互式登录（按项目配置的策略）
-anycli auth login --session-id <id>  # 直接设置 session-id
-anycli auth token <project>          # 交互输入 bearer-token 并写入配置（--token <t> 直传）
-anycli auth set-session <id>         # 脚本/CI 用（session-id）
+anycli auth login                       # 选择/按配置的授权方式，浏览器授权（自动回调或手动粘贴）
+anycli auth login --type bearer-token   # 指定 bearer-token 方式
+anycli auth login --session-id <id>     # session-id 方式：直接设置（脚本/CI）
+anycli auth login --token <t>           # bearer-token 方式：直接设置（脚本/CI）
+anycli auth token                       # 交互输入 bearer-token（Profile 级）
+anycli auth set-session <id>            # 脚本/CI 用（session-id）
 ```
 
 ### 检查状态 / 登出
@@ -145,6 +147,19 @@ anycli auth set-session <id>         # 脚本/CI 用（session-id）
 ```bash
 anycli auth status
 anycli auth logout
+```
+
+### 凭证自动刷新（用户自填地址 + 间隔）
+
+刷新接口地址与间隔均由用户在 Profile.auth 中自填（`anycli auth login` 时会引导配置），不配置则不自动刷新。
+刷新接口返回体约定 `{ success, data: { sessionId | token } }`。
+
+```bash
+anycli config set auth.refresh-url <url>        # 刷新接口地址
+anycli config set auth.refresh-interval <毫秒>   # 间隔（如 8 小时 = 28800000）
+anycli auth refresh                              # 手动触发一次刷新
+anycli auth scheduler install                    # 安装定时自动刷新（按配置间隔）
+anycli auth scheduler uninstall
 ```
 
 ### 环境变量（CI/CD）
@@ -157,7 +172,7 @@ anycli request cli-anything-x POST /api/example --body '{}'
 ## 配置
 
 ```bash
-anycli config init       # 交互式初始化（Profile、网关、登录 URL、认证）
+anycli config init       # 交互式初始化（Profile、网关、登录 URL）
 anycli config list       # 查看当前配置
 anycli config set <key> <value>
 anycli config profile    # Profile 管理（create/delete/list/show）
@@ -165,7 +180,7 @@ anycli config profile    # Profile 管理（create/delete/list/show）
 
 ### Profile 与环境
 
-配置按 Profile 组织，每个 Profile 独立保存 `env`、`gatewayUrl`、`loginUrl`，切换环境即切换 Profile：
+配置按 Profile 组织，每个 Profile 独立保存 `env`、`gatewayUrl`、`loginUrl`、`auth`（授权方式/凭证/刷新），切换环境即切换 Profile：
 
 ```bash
 anycli config profile create test
@@ -177,8 +192,8 @@ anycli config profile show
 
 | Header | 说明 | 来源 |
 |--------|------|------|
-| 认证头 | 按项目 AuthStrategy 注入（如 x-session-id / Authorization: Bearer） | `auth` 配置 |
-| 自定义头 | 由 `auth.extraHeaders` 配置（如租户标识 x-tenant-id / x-ext-tenant-id） | `auth` 配置 |
+| 认证头 | 按 Profile 授权方式注入（如 x-session-id / Authorization: Bearer） | `Profile.auth` |
+| 自定义头 | 由项目 `auth.extraHeaders` 配置（如租户标识 x-tenant-id / x-ext-tenant-id） | 项目 `auth` 配置 |
 
 > 具体项目需要固定附加的请求头（如多租户标识），在项目配置的 `auth.extraHeaders` 中声明，
 > 框架不会硬编码任何业务 Header。

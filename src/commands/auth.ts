@@ -2,8 +2,13 @@ import { Command } from 'commander';
 import open from 'open';
 import inquirer from 'inquirer';
 import http from 'http';
-import { setSessionId, getSessionId, getEnv, resolveProfileName, ENV_LABELS, refreshSessionId, getProfile, getProjectConfig, setProjectConfig, getProjectAuthConfig, getStrategy, requireProject, getLoginUrl } from '../core/index.js';
+import {
+  setSessionId, getSessionId, getEnv, resolveProfileName, ENV_LABELS,
+  refreshCredential, getProfile, getProfileAuthConfig, setProfileAuthType,
+  getProfileToken, setProfileToken, setProfileAuthField, getLoginUrl,
+} from '../core/index.js';
 import { success, info, output, warn } from '../core/output.js';
+import { AnycliError, ErrorCode } from '../core/errors.js';
 import { execSync } from 'child_process';
 import path from 'path';
 import fs from 'fs';
@@ -25,21 +30,29 @@ function getExecutableCommand(): string {
   return `node "${normalizedPath}"`;
 }
 
+/** 刷新间隔（小时）：取 Profile.auth.refreshIntervalMs，未配置默认 8 小时 */
+function getRefreshHours(): number {
+  const interval = getProfile().auth?.refreshIntervalMs;
+  if (interval && interval > 0) return Math.max(1, Math.round(interval / 3600000));
+  return 8;
+}
+
 async function installScheduler(): Promise<void> {
   const exeCmd = getExecutableCommand();
   const refreshCmd = `${exeCmd} auth refresh --silent`;
+  const hours = getRefreshHours();
   const platform = process.platform;
 
   if (platform === 'win32') {
     const taskName = 'AnycliSessionRefresh';
-    const registerCmd = `schtasks /create /tn "${taskName}" /tr "${refreshCmd.replace(/"/g, '\\"')}" /sc hourly /mo 8 /f`;
+    const registerCmd = `schtasks /create /tn "${taskName}" /tr "${refreshCmd.replace(/"/g, '\\"')}" /sc hourly /mo ${hours} /f`;
     try {
       execSync(registerCmd, { stdio: 'ignore' });
     } catch (err) {
       throw new Error(`创建计划任务失败，请确认当前终端有足够权限。错误信息: ${err instanceof Error ? err.message : err}`);
     }
   } else {
-    const cronJob = `0 */8 * * * ${refreshCmd} # AnycliSessionRefresh`;
+    const cronJob = `0 */${hours} * * * ${refreshCmd} # AnycliSessionRefresh`;
     let currentCron = '';
     try {
       currentCron = execSync('crontab -l', { encoding: 'utf8' });
@@ -110,21 +123,34 @@ async function uninstallScheduler(): Promise<void> {
 
 const CALLBACK_PORT = 19876;
 
-function startCallbackServer(): Promise<string> {
+/**
+ * 启动本地授权回调服务，接收登录页跳转回带的凭证。
+ * - session-id：期望 /callback?sessionId=xxx
+ * - bearer-token：期望 /callback?token=xxx
+ * 返回授权得到的凭证（sessionId 或 token）。失败时提供 /manual 手动粘贴页面兜底。
+ */
+function startCallbackServer(authType: 'session-id' | 'bearer-token'): Promise<string> {
   return new Promise((resolve, reject) => {
+    const isToken = authType === 'bearer-token';
+    const paramName = isToken ? 'token' : 'sessionId';
+    const displayLabel = isToken ? 'Token' : 'SessionId';
+    const pasteHint = isToken
+      ? '请粘贴 Access Token（登录后打开 F12 → Network → 任一请求的 Authorization 请求头中复制 Bearer 后的值）：'
+      : '请粘贴 sessionId（登录后 F12 → Application → Local Storage 中复制）：';
+
     const server = http.createServer((req, res) => {
       const url = new URL(req.url || '/', `http://localhost:${CALLBACK_PORT}`);
 
       if (url.pathname === '/callback') {
-        const sessionId = url.searchParams.get('sessionId');
-        if (sessionId) {
+        const value = url.searchParams.get(paramName);
+        if (value) {
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-          res.end('<html><body style="font-family:system-ui;text-align:center;margin-top:80px"><h2>✓ 登录成功！</h2><p>可以关闭此页面，回到终端继续操作。</p></body></html>');
+          res.end('<html><body style="font-family:system-ui;text-align:center;margin-top:80px"><h2>✓ 授权成功！</h2><p>可以关闭此页面，回到终端继续操作。</p></body></html>');
           server.close();
-          resolve(sessionId);
+          resolve(value);
         } else {
           res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
-          res.end('<html><body><h2>✗ 缺少 sessionId 参数</h2></body></html>');
+          res.end(`<html><body><h2>✗ 缺少 ${displayLabel} 参数</h2></body></html>`);
         }
         return;
       }
@@ -132,26 +158,26 @@ function startCallbackServer(): Promise<string> {
       if (url.pathname === '/manual') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(`<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>CLI-Anything-X 登录</title>
+<html><head><meta charset="utf-8"><title>CLI-Anything-X 授权</title>
 <style>body{font-family:system-ui;max-width:600px;margin:80px auto;padding:0 20px}
 input{width:100%;padding:12px;font-size:16px;margin:10px 0;box-sizing:border-box}
 button{padding:12px 24px;font-size:16px;background:#4f46e5;color:#fff;border:none;border-radius:6px;cursor:pointer}
 button:hover{background:#4338ca}.hint{color:#666;font-size:14px;margin-top:20px}</style>
 </head><body>
-<h2>CLI-Anything-X 登录</h2>
-<p>请粘贴 sessionId（从浏览器 F12 → Application → Local Storage 中复制）：</p>
-<input id="sid" placeholder="粘贴 sessionId..." autofocus />
-<button onclick="submit()">完成登录</button>
+<h2>CLI-Anything-X 授权</h2>
+<p>${pasteHint}</p>
+<input id="cred" placeholder="${displayLabel}" autofocus />
+<button onclick="submit()">完成授权</button>
 <div class="hint">
-  <p>获取方式：登录 Anycli 后，按 F12 → Application → Local Storage → 找到 sessionId 字段 → 复制值</p>
+  <p>在浏览器中登录后，把 ${displayLabel} 粘贴到此处。</p>
 </div>
 <script>
 function submit() {
-  const sid = document.getElementById('sid').value.trim();
-  if (!sid) { alert('请输入 sessionId'); return; }
-  window.location.href = '/callback?sessionId=' + encodeURIComponent(sid);
+  const v = document.getElementById('cred').value.trim();
+  if (!v) { alert('请输入${displayLabel}'); return; }
+  window.location.href = '/callback?${paramName}=' + encodeURIComponent(v);
 }
-document.getElementById('sid').addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+document.getElementById('cred').addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
 </script>
 </body></html>`);
         return;
@@ -175,7 +201,7 @@ document.getElementById('sid').addEventListener('keydown', e => { if (e.key === 
 
     const timer = setTimeout(() => {
       server.close();
-      reject(new Error('登录超时（120s），请重试'));
+      reject(new Error('授权超时（120s），请重试'));
     }, 120000);
 
     server.on('close', () => {
@@ -184,96 +210,182 @@ document.getElementById('sid').addEventListener('keydown', e => { if (e.key === 
   });
 }
 
+/** 按授权方式保存凭证 */
+function saveCredential(type: 'session-id' | 'bearer-token', value: string): void {
+  if (type === 'bearer-token') {
+    setProfileToken(value);
+  } else {
+    setSessionId(value);
+  }
+}
+
+/** 交互粘贴凭证（手动模式兜底） */
+async function promptPasteCredential(type: 'session-id' | 'bearer-token'): Promise<string> {
+  const message = type === 'bearer-token'
+    ? '请粘贴 Access Token（F12 → Network → Authorization 请求头，Bearer 后的值）:'
+    : '请粘贴 sessionId（F12 → Application → Local Storage → sessionId）:';
+  const { credential } = await inquirer.prompt<{ credential: string }>([
+    {
+      type: 'input',
+      name: 'credential',
+      message,
+      validate: (input: string) => input.trim().length > 0 || '凭证不能为空',
+    },
+  ]);
+  return credential.trim();
+}
+
+/** 登录成功后配置凭证自动刷新（地址 + 间隔 + 调度任务） */
+async function maybeConfigureRefresh(profileName: string): Promise<void> {
+  const auth = getProfileAuthConfig();
+  const defaultHours = auth.refreshIntervalMs ? Math.max(1, Math.round(auth.refreshIntervalMs / 3600000)) : 8;
+
+  const { autoRefresh } = await inquirer.prompt<{ autoRefresh: boolean }>([
+    {
+      type: 'confirm',
+      name: 'autoRefresh',
+      message: '是否需要开启凭证定时自动刷新？',
+      default: true,
+    },
+  ]);
+  if (!autoRefresh) {
+    info(`可稍后配置: anycli config set auth.refresh-url <url> && anycli auth scheduler install`);
+    return;
+  }
+
+  let refreshUrl = auth.refreshUrl || '';
+  if (!refreshUrl) {
+    const { url } = await inquirer.prompt<{ url: string }>([
+      {
+        type: 'input',
+        name: 'url',
+        message: '凭证刷新接口地址（返回体 { success, data: { sessionId | token } }，可稍后 anycli config set auth.refresh-url 修改）:',
+        validate: (input: string) => input.trim().length > 0 || '刷新接口地址不能为空',
+      },
+    ]);
+    refreshUrl = url.trim();
+    setProfileAuthField('refreshUrl', refreshUrl);
+  }
+
+  const { intervalHours } = await inquirer.prompt<{ intervalHours: number }>([
+    {
+      type: 'number',
+      name: 'intervalHours',
+      message: '刷新间隔（小时）:',
+      default: defaultHours,
+      validate: (input: number) => (input && input > 0) || '请输入大于 0 的数字',
+    },
+  ]);
+  setProfileAuthField('refreshIntervalMs', Math.round(intervalHours * 3600000));
+
+  try {
+    await installScheduler();
+    success(`凭证定时自动刷新任务开启成功！（每 ${intervalHours} 小时一次，Profile: ${profileName}）`);
+  } catch (err) {
+    warn(`定时任务注册失败: ${err instanceof Error ? err.message : err}`);
+    info('刷新配置已保存，可稍后执行: anycli auth scheduler install');
+  }
+}
+
 export function registerAuthCommands(program: Command): void {
   const auth = program.command('auth').description('认证管理');
 
   auth
     .command('login')
-    .description('登录（打开浏览器，自动获取 sessionId）')
-    .option('--session-id <id>', '直接设置 sessionId（跳过浏览器）')
+    .description('登录（选择授权方式：session-id 或 bearer-token）')
+    .option('--type <type>', '授权方式: session-id | bearer-token（不填则按当前配置或交互选择）')
+    .option('--session-id <id>', '直接设置 sessionId（session-id 方式，跳过浏览器）')
+    .option('--token <token>', '直接设置 token（bearer-token 方式，跳过浏览器）')
     .option('--manual', '手动模式（不启动本地服务器）')
-    .action(async (options: { sessionId?: string; manual?: boolean }) => {
+    .action(async (options: { type?: string; sessionId?: string; token?: string; manual?: boolean }) => {
       const profileName = resolveProfileName();
 
-      if (options.sessionId) {
+      // 1. 确定授权方式（整套 CLI 一套，跟随 Profile/环境）
+      let authType = options.type as 'session-id' | 'bearer-token' | undefined;
+      if (options.sessionId) authType = 'session-id';
+      if (options.token) authType = 'bearer-token';
+      if (!authType) {
+        const existing = getProfile().auth?.type;
+        if (existing === 'session-id' || existing === 'bearer-token') {
+          authType = existing;
+        } else {
+          const { type } = await inquirer.prompt<{ type: 'session-id' | 'bearer-token' }>([
+            {
+              type: 'list',
+              name: 'type',
+              message: '选择授权方式（整个 CLI 一套，跟随当前环境）:',
+              choices: [
+                { name: 'session-id（浏览器登录获取会话 ID）', value: 'session-id' },
+                { name: 'bearer-token（Bearer Token 授权）', value: 'bearer-token' },
+              ],
+            },
+          ]);
+          authType = type;
+        }
+      }
+      if (authType !== 'session-id' && authType !== 'bearer-token') {
+        throw new AnycliError(ErrorCode.INVALID_PARAMS, `不支持的授权方式: ${authType}（支持: session-id, bearer-token）`);
+      }
+      setProfileAuthType(authType);
+
+      const env = getEnv();
+      const loginUrl = getLoginUrl();
+      info(`Profile: ${profileName} | 环境: ${ENV_LABELS[env] || env} (${env}) | 授权方式: ${authType}`);
+
+      // 2. 直接传入凭证（脚本/CI）
+      if (authType === 'session-id' && options.sessionId) {
         setSessionId(options.sessionId);
         success(`SessionId 已设置 (Profile: ${profileName})`);
         return;
       }
-
-      const env = getEnv();
-      const loginUrl = getLoginUrl();
-      info(`Profile: ${profileName} | 环境: ${ENV_LABELS[env] || env} (${env})`);
-
-      if (options.manual) {
-        info(`请在浏览器中登录: ${loginUrl}`);
-        await open(loginUrl);
-        const { sessionId } = await inquirer.prompt([
-          {
-            type: 'input',
-            name: 'sessionId',
-            message: '请粘贴 sessionId（F12 → Application → Local Storage → sessionId）:',
-            validate: (input: string) => input.trim().length > 0 || 'sessionId 不能为空',
-          },
-        ]);
-        setSessionId(sessionId.trim());
-        success(`登录成功！(Profile: ${profileName})`);
+      if (authType === 'bearer-token' && options.token) {
+        setProfileToken(options.token.trim());
+        success(`Token 已设置 (Profile: ${profileName})`);
         return;
       }
 
-      info('正在启动本地登录服务...');
-      const sessionPromise = startCallbackServer();
-
-      const callbackUrl = `http://localhost:${CALLBACK_PORT}/callback`;
-      const authUrl = `${loginUrl}/cli-auth?callback=${encodeURIComponent(callbackUrl)}`;
-
-      info('正在打开浏览器登录...');
-      await open(authUrl);
-
-      console.log('');
-      info('如果浏览器未自动完成授权，请手动打开：');
-      info(`  http://localhost:${CALLBACK_PORT}/manual`);
-      console.log('');
-
+      // 3. 浏览器授权（自动回调 / 手动粘贴兜底）
       let loginSuccess = false;
-      try {
-        const sessionId = await sessionPromise;
-        setSessionId(sessionId);
-        success(`登录成功！SessionId 已保存 (Profile: ${profileName})`);
-        loginSuccess = true;
-      } catch (error) {
-        warn(`自动获取失败: ${error instanceof Error ? error.message : '未知错误'}`);
-        info('切换到手动模式...');
-        const { sessionId } = await inquirer.prompt([
-          {
-            type: 'input',
-            name: 'sessionId',
-            message: '请粘贴 sessionId:',
-            validate: (input: string) => input.trim().length > 0 || 'sessionId 不能为空',
-          },
-        ]);
-        setSessionId(sessionId.trim());
+      if (options.manual) {
+        info(`请在浏览器中登录: ${loginUrl}`);
+        await open(loginUrl);
+        const credential = await promptPasteCredential(authType);
+        saveCredential(authType, credential);
         success(`登录成功！(Profile: ${profileName})`);
         loginSuccess = true;
+      } else {
+        info('正在启动本地授权服务...');
+        const credentialPromise = startCallbackServer(authType);
+
+        const callbackUrl = `http://localhost:${CALLBACK_PORT}/callback`;
+        const authUrl = `${loginUrl}/cli-auth?callback=${encodeURIComponent(callbackUrl)}`;
+
+        info('正在打开浏览器授权...');
+        await open(authUrl);
+
+        console.log('');
+        info('如果浏览器未自动完成授权，请手动打开：');
+        info(`  http://localhost:${CALLBACK_PORT}/manual`);
+        console.log('');
+
+        try {
+          const credential = await credentialPromise;
+          saveCredential(authType, credential);
+          success(`登录成功！${authType === 'bearer-token' ? 'Token' : 'SessionId'} 已保存 (Profile: ${profileName})`);
+          loginSuccess = true;
+        } catch (error) {
+          warn(`自动授权失败: ${error instanceof Error ? error.message : '未知错误'}`);
+          info('切换到手动模式...');
+          const credential = await promptPasteCredential(authType);
+          saveCredential(authType, credential);
+          success(`登录成功！(Profile: ${profileName})`);
+          loginSuccess = true;
+        }
       }
 
+      // 4. 自动刷新配置
       if (loginSuccess) {
-        const { autoRefresh } = await inquirer.prompt([
-          {
-            type: 'confirm',
-            name: 'autoRefresh',
-            message: '是否需要开启 SessionId 定时自动刷新（每8小时一次）？',
-            default: true,
-          }
-        ]);
-        if (autoRefresh) {
-          try {
-            await installScheduler();
-            success('SessionId 定时自动刷新任务开启成功！');
-          } catch (err) {
-            warn(`定时任务注册失败: ${err instanceof Error ? err.message : err}`);
-          }
-        }
+        await maybeConfigureRefresh(profileName);
         process.exit(0);
       }
     });
@@ -283,64 +395,87 @@ export function registerAuthCommands(program: Command): void {
     .description('查看当前登录状态')
     .action(() => {
       const profileName = resolveProfileName();
-      const sessionId = getSessionId();
+      const authCfg = getProfileAuthConfig();
+      const type = authCfg.type;
+      const credential = type === 'bearer-token' ? getProfileToken() : getSessionId();
       const env = getEnv();
       output({
         profile: profileName,
-        loggedIn: !!sessionId,
-        sessionId: sessionId ? `${sessionId.slice(0, 8)}...` : null,
+        type,
+        loggedIn: !!credential,
+        credential: credential
+          ? (type === 'bearer-token' ? `${credential.slice(0, 6)}...` : `${credential.slice(0, 8)}...`)
+          : null,
         env,
         envLabel: ENV_LABELS[env] || env,
+        refreshUrl: authCfg.refreshUrl || null,
+        refreshIntervalMs: authCfg.refreshIntervalMs || null,
       });
     });
 
   auth
     .command('logout')
-    .description('登出（清除当前 Profile 的 sessionId）')
+    .description('登出（清除当前 Profile 的凭证）')
     .action(() => {
-      setSessionId('');
+      const type = getProfile().auth?.type || 'session-id';
+      if (type === 'bearer-token') {
+        setProfileAuthField('token', undefined);
+      } else {
+        setSessionId('');
+      }
       success(`已登出 (Profile: ${resolveProfileName()})`);
     });
 
   auth
     .command('set-session <sessionId>')
-    .description('直接设置 sessionId（适合脚本/CI）')
+    .description('直接设置 sessionId（session-id 方式，适合脚本/CI）')
     .action((sessionId: string) => {
+      setProfileAuthType('session-id');
       setSessionId(sessionId);
       success(`SessionId 已设置 (Profile: ${resolveProfileName()})`);
     });
+
   auth
-    .command('token <project>')
-    .description('设置项目的 Bearer Token（默认交互输入；可用 --token 直接传入，或直接编辑 ~/.anycli/config）')
+    .command('token [project]')
+    .description('设置 Bearer Token（Profile 级，整个 CLI 通用；project 参数已废弃，保留兼容）')
     .option('--token <token>', '直接指定 token（适合脚本/CI，避免交互）')
-    .action(async (project: string, options: { token?: string }) => {
-      requireProject(project);
-      const auth = { ...getProjectAuthConfig(project), type: 'bearer-token' as const };
+    .action(async (project: string | undefined, options: { token?: string }) => {
+      if (project) {
+        warn('auth token 已改为 Profile 级（整个 CLI 一套授权），project 参数不再生效');
+      }
+      setProfileAuthType('bearer-token');
       if (options.token) {
-        const config = getProjectConfig(project)!;
-        setProjectConfig(project, { ...config, auth: { ...auth, token: options.token.trim() } });
-        success(`Token 已设置 (project: ${project})`);
+        setProfileToken(options.token.trim());
+        success(`Token 已设置 (Profile: ${resolveProfileName()})`);
         return;
       }
-      const strategy = getStrategy('bearer-token');
-      await strategy.ensureAuth?.({ project, auth, profile: getProfile() });
-      success(`Token 已保存到配置 (project: ${project})，也可直接编辑 ~/.anycli/config 修改`);
+      const { token } = await inquirer.prompt<{ token: string }>([
+        {
+          type: 'password',
+          name: 'token',
+          message: '请输入 Bearer Token:',
+          validate: (input: string) => input.trim().length > 0 || 'token 不能为空',
+        },
+      ]);
+      setProfileToken(token.trim());
+      success(`Token 已保存到配置 (Profile: ${resolveProfileName()})，也可直接编辑 ~/.anycli/config 修改`);
     });
 
   auth
     .command('refresh')
-    .description('静默刷新本地的 sessionId')
+    .description('静默刷新当前 Profile 的凭证（session-id / bearer-token）')
     .option('--silent', '静默模式（不输出普通日志）')
     .action(async (options: { silent?: boolean }) => {
       try {
-        const newSessionId = await refreshSessionId();
+        const credential = await refreshCredential();
         if (!options.silent) {
-          success(`SessionId 刷新成功！新 SessionId: ${newSessionId.slice(0, 8)}...`);
+          const label = getProfile().auth?.type === 'bearer-token' ? 'Token' : 'SessionId';
+          success(`${label} 刷新成功！新${label}: ${credential.slice(0, 8)}...`);
         }
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : '未知错误';
         if (!options.silent) {
-          warn(`SessionId 刷新失败: ${errMsg}`);
+          warn(`凭证刷新失败: ${errMsg}`);
         } else {
           console.error(`[anycli:refresh-error] ${errMsg}`);
         }
@@ -348,15 +483,16 @@ export function registerAuthCommands(program: Command): void {
       }
     });
 
-  const scheduler = auth.command('scheduler').description('自动刷新定时任务管理');
+  const scheduler = auth.command('scheduler').description('凭证自动刷新定时任务管理');
 
   scheduler
     .command('install')
-    .description('安装每 8 小时自动刷新 SessionId 的定时任务')
+    .description('安装凭证定时自动刷新任务（间隔取 Profile.auth.refreshIntervalMs，默认 8 小时）')
     .action(async () => {
       try {
         await installScheduler();
-        success('定时任务安装成功，将每 8 小时自动执行刷新');
+        const hours = getRefreshHours();
+        success(`定时任务安装成功，将每 ${hours} 小时自动执行凭证刷新`);
       } catch (err) {
         warn(err instanceof Error ? err.message : String(err));
       }
@@ -364,7 +500,7 @@ export function registerAuthCommands(program: Command): void {
 
   scheduler
     .command('uninstall')
-    .description('卸载自动刷新 SessionId 的定时任务')
+    .description('卸载凭证自动刷新定时任务')
     .action(async () => {
       try {
         await uninstallScheduler();
@@ -374,4 +510,3 @@ export function registerAuthCommands(program: Command): void {
       }
     });
 }
-

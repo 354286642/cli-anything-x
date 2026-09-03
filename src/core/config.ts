@@ -14,16 +14,31 @@ const PACKAGE_ROOT = resolve(__dirname, '../..');
 /** 鉴权策略类型：session-id / bearer-token 已实现；oauth2 / api-key 预留接口 */
 export type AuthStrategyType = 'session-id' | 'bearer-token' | 'oauth2' | 'api-key';
 
-/** 项目级鉴权配置（开源框架不内置任何公司默认值，全部按项目配置） */
+/**
+ * Profile 级统一鉴权配置（整个 CLI 一套授权方式，跟随环境/Profile，不再按项目细分）。
+ * - type：授权方式（session-id / bearer-token），由 `anycli auth login` 选择、`anycli config set auth-type` 切换。
+ * - token：bearer-token 凭证（session-id 用 Profile.sessionId）。
+ * - refreshUrl / refreshIntervalMs：用户自填的凭证刷新接口地址与间隔（两种方式通用），不配置则不自动刷新。
+ * - extraHeaders：刷新接口需要的静态请求头（如租户头），可选。
+ */
+export interface ProfileAuthConfig {
+  type: AuthStrategyType;
+  token?: string;
+  refreshUrl?: string;
+  refreshIntervalMs?: number;
+  extraHeaders?: Record<string, string>;
+}
+
+/** 一次请求解析出的有效鉴权配置：授权方式/凭证/刷新来自 Profile，静态请求头来自项目（如 x-tenant-id） */
 export interface ProjectAuthConfig {
   type: AuthStrategyType;
   /** 每次请求附加的静态请求头（如 x-tenant-id / x-ext-tenant-id），不同公司可自定义 */
   extraHeaders?: Record<string, string>;
-  /** session-id：刷新接口地址（不配置则不自动刷新） */
+  /** 凭证刷新接口地址（Profile 级，用户自填；不配置则不自动刷新） */
   refreshUrl?: string;
-  /** session-id：刷新间隔毫秒（如 8h = 28800000），由项目决定是否启用 */
+  /** 凭证刷新间隔毫秒（如 8h = 28800000），用户可自行配置 */
   refreshIntervalMs?: number;
-  /** bearer-token：凭证（不配置时通过 anycli auth token 交互输入并回写） */
+  /** bearer-token：凭证（Profile 级，存于 Profile.auth.token） */
   token?: string;
 }
 
@@ -44,6 +59,8 @@ export interface ProfileData {
   loginUrl?: string;
   sessionId: string;
   sessionUpdatedAt?: number;
+  /** 统一鉴权配置（整个 CLI 一套授权方式，跟随本 Profile/环境） */
+  auth?: ProfileAuthConfig;
   projects: Record<string, ProjectConfig>;
 }
 
@@ -232,17 +249,71 @@ export function getProjectConfig(projectName: string): ProjectConfig | undefined
 }
 
 /**
- * 从项目配置解析鉴权配置（纯函数，便于测试）。
- * 1c 之前公司配置用 tenantId/extTenantId 直填 x-tenant-id/x-ext-tenant-id；
- * 现统一走 auth.extraHeaders（任意静态请求头，开源框架不硬编码公司头名）。
- * 新项目请直接在 auth.extraHeaders 中配置所需请求头。
+ * 解析项目级静态请求头（auth.extraHeaders + 兼容旧 tenantId/extTenantId 直填）。
+ * 授权方式/凭证不在这里——整个 CLI 一套授权，见 Profile.auth。
  */
-export function resolveAuthFromProjectConfig(config?: ProjectConfig): ProjectAuthConfig {
-  const auth = (config?.auth || { type: 'session-id' as AuthStrategyType });
-  const extra: Record<string, string> = { ...(auth.extraHeaders || {}) };
+export function resolveProjectHeaders(config?: ProjectConfig): Record<string, string> {
+  const auth = config?.auth;
+  const extra: Record<string, string> = { ...(auth?.extraHeaders || {}) };
   if (config?.tenantId && !('x-tenant-id' in extra)) extra['x-tenant-id'] = config.tenantId;
   if (config?.extTenantId && !('x-ext-tenant-id' in extra)) extra['x-ext-tenant-id'] = config.extTenantId;
-  return { ...auth, extraHeaders: extra };
+  return extra;
+}
+
+/**
+ * 获取当前 Profile 的统一鉴权配置（授权方式 + 凭证 + 刷新配置）。
+ * 未配置时默认 session-id。
+ */
+export function getProfileAuthConfig(): ProjectAuthConfig {
+  const profile = getProfile();
+  const profileAuth = profile.auth || { type: 'session-id' as AuthStrategyType };
+  return {
+    type: profileAuth.type,
+    token: profileAuth.token,
+    refreshUrl: profileAuth.refreshUrl,
+    refreshIntervalMs: profileAuth.refreshIntervalMs,
+    extraHeaders: profileAuth.extraHeaders || {},
+  };
+}
+
+/** 设置当前 Profile 的统一鉴权配置字段 */
+export function setProfileAuthField(field: keyof ProfileAuthConfig, value: unknown): void {
+  const profile = getProfile();
+  const auth: ProfileAuthConfig = { type: 'session-id', ...(profile.auth || {}) };
+  (auth as unknown as Record<string, unknown>)[field] = value;
+  setProfileField('auth', auth);
+}
+
+/** 设置当前 Profile 的授权方式（session-id / bearer-token） */
+export function setProfileAuthType(type: AuthStrategyType): void {
+  setProfileAuthField('type', type);
+}
+
+/** 获取当前 Profile 的 bearer-token 凭证 */
+export function getProfileToken(): string {
+  return getProfile().auth?.token || '';
+}
+
+/** 设置当前 Profile 的 bearer-token 凭证 */
+export function setProfileToken(token: string): void {
+  setProfileAuthField('token', token);
+}
+
+/**
+ * 解析某项目一次请求的有效鉴权配置。
+ * 授权方式/凭证/刷新配置来自 Profile（整个 CLI 一套），静态请求头来自项目（如 x-tenant-id / x-ext-tenant-id）。
+ * 1c 之前公司配置用 tenantId/extTenantId 直填 x-tenant-id/x-ext-tenant-id；现统一走 auth.extraHeaders，
+ * 开源框架不硬编码公司头名。新项目请直接在项目 auth.extraHeaders 中配置所需请求头。
+ */
+export function resolveAuthFromProjectConfig(config?: ProjectConfig): ProjectAuthConfig {
+  const profileAuth = getProfile().auth || { type: 'session-id' as AuthStrategyType };
+  return {
+    type: profileAuth.type,
+    token: profileAuth.token,
+    refreshUrl: profileAuth.refreshUrl,
+    refreshIntervalMs: profileAuth.refreshIntervalMs,
+    extraHeaders: resolveProjectHeaders(config),
+  };
 }
 
 export function getProjectAuthConfig(projectName: string): ProjectAuthConfig {

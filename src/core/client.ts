@@ -84,7 +84,7 @@ export function createClient(projectName: string) {
         throw new AnycliError(
           ErrorCode.AUTH_EXPIRED,
           '认证已过期或凭证无效',
-          `anycli auth login / anycli auth token ${projectName}`
+          `anycli auth login`
         );
       }
 

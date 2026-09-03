@@ -2,6 +2,8 @@ export {
   getConfig, setConfig,
   getSessionId, setSessionId,
   getProjectConfig, setProjectConfig, getProjectAuthConfig,
+  getProfileAuthConfig, setProfileAuthField, setProfileAuthType,
+  getProfileToken, setProfileToken,
   getEnv, getDefaultFormat, getGatewayUrl, getLoginUrl,
   getAllProjects, projectExists,
   ENV_LABELS, CONFIG_DIR,
@@ -11,8 +13,8 @@ export {
   getActiveProfileName, setActiveProfile, profileExists,
   setProfileOverride, getProfileOverride,
 } from './config.js';
-export type { ProjectConfig, AnycliConfig, ProfileData, ProjectAuthConfig, AuthStrategyType } from './config.js';
-export { requireSession, requireProject, refreshSessionId, getStrategy } from './auth.js';
+export type { ProjectConfig, AnycliConfig, ProfileData, ProjectAuthConfig, ProfileAuthConfig, AuthStrategyType } from './config.js';
+export { requireSession, requireProject, refreshCredential, getStrategy } from './auth.js';
 export type { AuthStrategy, AuthContext } from './auth.js';
 export { createClient } from './client.js';
 export type { AnycliClient, RequestOptions, ApiResponse } from './client.js';

@@ -37,13 +37,25 @@ anycli config profile delete old-one # 删除
   "profiles": {
     "default": {
       "env": "prod",
+      "gatewayUrl": "https://gateway.example.com",
+      "loginUrl": "https://login.example.com",
       "sessionId": "xxx",
+      "auth": {
+        "type": "session-id",
+        "refreshUrl": "https://gateway.example.com/refresh",
+        "refreshIntervalMs": 28800000,
+        "extraHeaders": { "x-tenant-id": "demo-service" }
+      },
       "projects": {
         "demo": {
           "baseUrl": "https://gateway.example.com",
           "prefix": "demo-service",
-          "tenantId": "demo-service",
-          "extTenantId": "demo-service"
+          "auth": {
+            "extraHeaders": {
+              "x-tenant-id": "demo-service",
+              "x-ext-tenant-id": "demo-service"
+            }
+          }
         }
       }
     }
@@ -53,19 +65,20 @@ anycli config profile delete old-one # 删除
 
 ## 认证
 
-每个请求自动携带：
+整个 CLI **一套授权方式**（session-id / bearer-token），跟随 Profile（环境）配置，不按项目细分。每次请求自动携带：
 
-| Header | 说明 |
-|--------|------|
-| `x-session-id` | 登录会话（按 Profile 隔离） |
-| `x-tenant-id` | 项目标识 |
-| `x-ext-tenant-id` | 扩展租户 |
+| Header | 说明 | 来源 |
+|--------|------|------|
+| `x-session-id` 或 `Authorization: Bearer` | 认证头（按 Profile 授权方式注入） | `Profile.auth` |
+| `x-tenant-id` / `x-ext-tenant-id` | 项目租户标识（自定义静态头） | 项目 `auth.extraHeaders` |
 
 ```bash
-anycli auth login                    # 浏览器登录（保存到当前 Profile）
-anycli --profile test-main auth login  # 登录到指定 Profile
-anycli auth status                   # 检查状态
-anycli auth set-session <id>         # CI/CD 用
+anycli auth login                     # 选择授权方式并浏览器授权（保存到当前 Profile）
+anycli auth login --type bearer-token # 指定授权方式
+anycli --profile test-main auth login # 登录到指定 Profile
+anycli auth token                     # 交互输入 bearer-token（Profile 级）
+anycli auth status                    # 检查状态
+anycli auth set-session <id>          # CI/CD 用（session-id）
 ```
 
 ## 环境
@@ -75,20 +88,21 @@ anycli auth set-session <id>         # CI/CD 用
 | test | https://test-gateway.example.com |
 | prod | https://gateway.example.com |
 
-## SessionId 定时自动刷新（保活）
+## 凭证定时自动刷新（保活）
 
-为了避免 `sessionId` 在 12 小时后彻底失效导致用户必须重新扫码登录，CLI 提供了基于系统定时任务的后台刷新机制。只要当前的 `sessionId` 依然处于有效期内，定时任务每 8 小时会在后台自动调用刷新接口换取新 Token 并静默写入配置文件。
+为了避免凭证（sessionId / token）过期导致需重新登录，CLI 提供基于系统定时任务的后台刷新机制。**刷新接口地址与间隔均由用户配置**（`Profile.auth.refreshUrl` / `refreshIntervalMs`），不配置则不自动刷新；刷新接口返回体约定 `{ success, data: { sessionId | token } }`。
 
 ### 使用与管理
 
-在成功执行 `anycli auth login` 登录后，系统会交互式询问是否开启自动刷新服务（选择 `y` 即可一步到位）。您也可以通过以下命令手动维护：
+在成功执行 `anycli auth login` 登录后，系统会交互式询问是否开启自动刷新，并引导填写刷新接口地址与间隔。也可手动配置与维护：
 
 ```bash
-# 安装每 8 小时自动刷新 SessionId 的定时任务
-# 自动检测当前 OS（Windows 计划任务 / macOS & Linux crontab），动态定位 CLI 运行脚本，不写死目录
-anycli auth scheduler install
+# 配置刷新接口与间隔
+anycli config set auth.refresh-url <url>
+anycli config set auth.refresh-interval 28800000   # 8 小时（毫秒）
 
-# 卸载已安装的自动刷新定时任务
+# 安装定时任务（自动检测当前 OS：Windows 计划任务 / macOS & Linux crontab）
+anycli auth scheduler install
 anycli auth scheduler uninstall
 
 # 手动执行一次静默刷新（通常供定时任务调用）

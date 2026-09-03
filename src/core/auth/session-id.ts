@@ -6,7 +6,7 @@ import { AnycliError, ErrorCode } from '../errors.js';
  * session-id 鉴权策略。
  * - 凭证：Profile 级 sessionId（一次登录，多项目共享同一会话）。
  * - 请求头：x-session-id。
- * - 刷新：仅当项目配置 auth.refreshUrl 时启用（公司网关的刷新接口由私有配置提供），
+ * - 刷新：仅当 Profile.auth.refreshUrl 配置时启用（用户自填刷新接口），
  *   返回体约定 { success, data: { sessionId } }。
  */
 export const sessionIdStrategy: AuthStrategy = {

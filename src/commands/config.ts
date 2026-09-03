@@ -12,6 +12,7 @@ import {
   createProfile, deleteProfile, listProfiles,
   getActiveProfileName, setActiveProfile, profileExists,
   setProfileField,
+  getProfileAuthConfig, setProfileAuthType, setProfileAuthField, getProfileToken,
 } from '../core/index.js';
 import type { ProfileData } from '../core/index.js';
 import { output, success, info, warn } from '../core/output.js';
@@ -271,6 +272,8 @@ export function registerConfigCommands(program: Command): void {
       const profileName = resolveProfileName();
       const profile = getProfile();
       const cfg = getConfig();
+      const authCfg = getProfileAuthConfig();
+      const credential = authCfg.type === 'bearer-token' ? getProfileToken() : profile.sessionId;
       output({
         profile: profileName,
         isActive: profileName === getActiveProfileName(),
@@ -278,14 +281,17 @@ export function registerConfigCommands(program: Command): void {
         envLabel: ENV_LABELS[profile.env] || profile.env,
         gateway: profile.gatewayUrl || '',
         defaultFormat: cfg.defaultFormat,
-        sessionId: profile.sessionId ? `${profile.sessionId.slice(0, 8)}...` : '(未登录)',
+        authType: authCfg.type,
+        refreshUrl: authCfg.refreshUrl || null,
+        refreshIntervalMs: authCfg.refreshIntervalMs || null,
+        credential: credential ? `${credential.slice(0, 8)}...` : '(未登录)',
         projects: profile.projects,
       });
     });
 
   config
     .command('set <key> <value>')
-    .description('设置配置项（如: anycli config set env prod）')
+    .description('设置配置项（如: anycli config set env prod；auth-type session-id|bearer-token；auth.refresh-url <url>；auth.refresh-interval <毫秒>）')
     .action((key: string, value: string) => {
       if (key === 'env') {
         setProfileField('env', value);
@@ -293,6 +299,21 @@ export function registerConfigCommands(program: Command): void {
         setProfileField('gatewayUrl', value);
       } else if (key === 'login-url' || key === 'loginUrl') {
         setProfileField('loginUrl', value);
+      } else if (key === 'auth-type' || key === 'authType') {
+        if (value !== 'session-id' && value !== 'bearer-token') {
+          warn('auth-type 仅支持: session-id, bearer-token');
+          return;
+        }
+        setProfileAuthType(value);
+      } else if (key === 'auth.refresh-url' || key === 'authRefreshUrl') {
+        setProfileAuthField('refreshUrl', value);
+      } else if (key === 'auth.refresh-interval' || key === 'authRefreshIntervalMs') {
+        const ms = parseInt(value, 10);
+        if (!Number.isFinite(ms) || ms <= 0) {
+          warn('刷新间隔需为毫秒数（如 8 小时 = 28800000）');
+          return;
+        }
+        setProfileAuthField('refreshIntervalMs', ms);
       } else if (key === 'defaultFormat') {
         setConfig('defaultFormat', value);
       } else {
@@ -305,7 +326,9 @@ export function registerConfigCommands(program: Command): void {
     .command('get <key>')
     .description('查看配置项')
     .action((key: string) => {
-      if (key === 'env' || key === 'sessionId' || key === 'projects') {
+      if (key === 'auth-type') {
+        output({ 'auth-type': getProfileAuthConfig().type });
+      } else if (key === 'env' || key === 'sessionId' || key === 'projects') {
         const profile = getProfile();
         output({ [key]: (profile as unknown as Record<string, unknown>)[key] ?? null });
       } else {
