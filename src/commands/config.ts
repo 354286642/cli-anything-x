@@ -22,6 +22,10 @@ const PACKAGE_ROOT = resolve(__dirname, '../..');
 
 const RESERVED_NAMES = ['auth', 'config', 'skill', 'help'];
 
+/** 开源默认演示地址：仅作为交互提示的占位默认值，不绑定任何真实服务（RFC 2606 保留域名） */
+const DEMO_GATEWAY_URL = 'https://api.example.com';
+const DEMO_LOGIN_URL = 'https://login.example.com';
+
 function toPascalCase(name: string): string {
   return name
     .split(/[-_]/)
@@ -129,14 +133,14 @@ export function registerConfigCommands(program: Command): void {
           type: 'input',
           name: 'gatewayUrl',
           message: '网关地址（整个工程一份，可稍后 anycli config set gateway-url 修改）:',
-          default: profile.gatewayUrl || '',
+          default: profile.gatewayUrl || DEMO_GATEWAY_URL,
           validate: (input: string) => input.trim().length > 0 || '网关地址不能为空',
         },
         {
           type: 'input',
           name: 'loginUrl',
           message: '登录页地址（session-id 授权用，可稍后 anycli config set login-url 修改）:',
-          default: profile.loginUrl || '',
+          default: profile.loginUrl || DEMO_LOGIN_URL,
         },
       ]);
 

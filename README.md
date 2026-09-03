@@ -11,9 +11,11 @@
 - 🧩 **流程 Skill 一键编排与自动完善** — 在流程步骤页组合已有业务能力，自动生成包含字段、前置条件、错误处理和验证资料的流程初稿，并通过接地校验保障可执行
 - 🖥️ **统一 Skill 工作台** — 新增项目和 Skill 自动发现，在线完成接口注册、Skill 管理、Flow 编排、预览、编译和导出
 - 🧬 **技能强化** — 分析 Java service 链路，补充业务规则、参数校验、调用链路和异常场景
-- 📥 **可执行技能包导出** — 支持普通配置版和通过 MCP 动态获取 sessionId 的飞书版，导出自包含技能包供未安装 CLI 的业务方使用
+- 📥 **可执行技能包导出** — 导出自包含技能包供未安装 CLI 的业务方使用（普通配置版通用可用；另有飞书版，见文末说明）
 - 👤 **多 Profile** — 支持多环境、多租户和独立会话配置
 - 🧪 **Live Lens（测试中）** — 通过浏览器录制操作和网络请求，自动生成流程 Skill
+
+> **飞书版导出说明**：通过 MCP 动态获取 sessionId 的飞书版，需要企业自建 MCP 凭证服务并接入飞书登录链路，属企业内部/私有化场景的可选能力，并非所有环境都具备该配置；通用场景请使用普通配置版。
 
 ## 安装
 
@@ -53,17 +55,6 @@ anycli request cli-anything-x POST /api/example --body '{}'  # 调用业务接�
 ├── apis/{project}/{module}.json # 接口注册表
 ├── skills/{project}/            # 生成的 Skill 与流程
 └── src/projects/                # 专属命令（可选）
-```
-
-框架随包自带两个合成内容用于开箱体验：`skills/anycli`（主入口 Skill）与 `skills/demo`（示例项目），它们只读、不随业务数据混在一起。
-
-新用户拉取代码后：
-
-```bash
-npm install -g cli-anything-x     # 全局安装（skills/anycli、skills/demo 随包发布）
-anycli config init                # 首次运行自动创建 ~/.anycli，交互式完成配置
-anycli init <project>             # 一键接入业务系统，生成 ~/.anycli/apis/{project}/、~/.anycli/skills/{project}/
-anycli skill install              # 安装技能到 ~/.agents/skills/
 ```
 
 ### 团队协作 / 私有数据仓（指定工作目录）
