@@ -259,8 +259,20 @@ async function maybeConfigureRefresh(profileName: string): Promise<void> {
       {
         type: 'input',
         name: 'url',
-        message: '凭证刷新接口地址（返回体 { success, data: { sessionId | token } }，可稍后 anycli config set auth.refresh-url 修改）:',
-        validate: (input: string) => input.trim().length > 0 || '刷新接口地址不能为空',
+        message: '凭证刷新接口地址（需填写完整 URL，含协议与域名，如 https://api.example.com/refresh；返回体约定 { success, data: { sessionId | token } }；可稍后 anycli config set auth.refresh-url 修改）:',
+        validate: (input: string) => {
+          const v = input.trim();
+          if (!v) return '刷新接口地址不能为空';
+          try {
+            const u = new URL(v);
+            if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+              return '需以 http:// 或 https:// 开头的完整 URL（含域名，如 https://api.example.com/refresh）';
+            }
+          } catch {
+            return '格式不正确，需填写完整 URL（含协议与域名，如 https://api.example.com/refresh）';
+          }
+          return true;
+        },
       },
     ]);
     refreshUrl = url.trim();

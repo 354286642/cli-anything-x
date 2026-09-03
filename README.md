@@ -68,6 +68,65 @@ anycli config set workspace /path/to/workspace   # 或 export ANYCLI_WORKSPACE=/
 
 `config.json` 含本机会话凭证，建议加入 `.gitignore` 不入库。框架仓保持干净（只含代码与合成示例），业务数据在私有仓独立演进、独立权限。
 
+## 配置文件（config.json）
+
+配置存在工作目录根的 `config.json`（默认 `~/.anycli/config.json`）。整个 CLI 只有一份配置，按 Profile 分环境；每个 Profile 独立保存环境、网关、登录地址与授权。
+
+> JSON 本身不支持注释，下面的 `#` 只是说明性标注，实际文件中不要写入。
+
+```json
+{
+  "activeProfile": "default",                        # 当前生效的 Profile 名
+  "defaultFormat": "json",                           # 输出格式 json | table | text
+  "workspace": "C:\\code\\my-data",                  # 可选：指定其他目录为工作目录（团队/私有数据仓形态）
+  "profiles": {
+    "test": {                                        # Profile 名，切换环境即切换 Profile
+      "env": "test",                                 # 环境标识
+      "gatewayUrl": "https://api.example.com",       # 网关地址（整个 Profile 一份）
+      "loginUrl": "https://login.example.com",       # 浏览器授权登录页地址
+      "sessionId": "xxx",                            # session-id 凭证（auth login 写入，勿手填）
+      "auth": {
+        "type": "session-id",                        # 授权方式：session-id | bearer-token（整套一套，跟随 Profile）
+        "token": "xxx",                              # bearer-token 凭证（仅 bearer-token 方式用）
+        "refreshUrl": "https://api.example.com/user/refresh",  # 凭证刷新接口（必须完整 URL，不配置则不自动刷新）
+        "refreshIntervalMs": 28800000,               # 刷新间隔（毫秒，8 小时 = 28800000）
+        "extraHeaders": {                            # 可选：刷新接口需要的静态请求头（如租户头）
+          "x-tenant-id": "demo-service"
+        }
+      },
+      "projects": {                                  # 业务系统接入
+        "demo": {
+          "baseUrl": "https://api.example.com",      # 项目请求基址
+          "prefix": "demo-service",                  # 网关路由前缀
+          "auth": {
+            "extraHeaders": {                        # 可选：每次请求附加的静态请求头（如多租户标识）
+              "x-tenant-id": "demo-service",
+              "x-ext-tenant-id": "demo-service"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+**授权方式与凭证**
+
+- 整个 CLI 只保留一套授权（session-id / bearer-token），跟随当前 Profile 环境，不按项目细分。
+- 用 `anycli auth login` 选择授权方式并写入凭证；也可 `anycli config set auth-type session-id|bearer-token` 切换。
+- 凭证自动刷新：`auth.refreshUrl`（必须完整 URL，含协议与域名）与间隔 `auth.refreshIntervalMs` 由用户自填；刷新接口返回体约定 `{ success, data: { sessionId | token } }`。
+
+**项目请求头**
+
+- 多租户等静态请求头放项目 `auth.extraHeaders`（如 `x-tenant-id` / `x-ext-tenant-id`），框架不硬编码任何业务 Header。
+- 兼容遗留字段：项目顶层 `tenantId` / `extTenantId` 仍可读取，等价于 `extraHeaders` 里的 `x-tenant-id` / `x-ext-tenant-id`；新配置建议直接用 `extraHeaders`。
+
+**团队协作 / 私有数据仓**
+
+- 本机 `config.json` 含个人凭证（sessionId / token），务必加入 `.gitignore` 不入库。
+- 需要共享的"环境 + 项目 + 租户头"模板可放私有仓（如 `config/company.json`），个人凭证留本地，参见上节「团队协作 / 私有数据仓」。
+
 ## 文档
 
 | 文档 | 内容 |
