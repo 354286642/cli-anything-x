@@ -1,6 +1,8 @@
 # CLI-Anything-X
 
-从 Java 后端接口与参数一键生成可执行的 AI 技能（Skill），并支持把多个技能编排成业务流程（Flow）。还能用浏览器录制真实操作（Live Lens）自动产出流程型 Skill，让 AI 助手通过命令行直接调用你的业务系统、替你完成真实业务。
+从后端接口与参数一键生成可执行的 AI 技能（Skill），并支持把多个技能编排成业务流程（Flow）。支持浏览器录制真实操作（Live Lens）自动产出流程型 Skill，通过 agent 直接调用 cli-anything-x 产出的内容即可操作你的业务系统。
+
+> 目前暂只支持从 Java 项目获取接口，其他语言后续支持。
 
 ## 特性
 
@@ -37,10 +39,16 @@ anycli request cli-anything-x POST /api/example --body '{}'  # 调用业务接�
 
 ## 框架与业务数据（Workspace）
 
-`cli-anything-x` 是**框架**：它本身不含任何业务数据。你的业务数据——配置 `config.json`、接口注册表 `apis/`、AI Skill 与流程 `skills/`、专属命令 `src/projects/`——统一放在一个**工作目录（Workspace）**里，框架通过它读取数据。默认工作目录就是 `~/.anycli`，框架首次运行会自动创建：
+`cli-anything-x` 是**框架**：它本身不含任何业务数据。业务数据——配置 `config.json`、接口注册表 `apis/`、AI Skill 与流程 `skills/`、专属命令 `src/projects/`——统一放在一个**工作目录（Workspace）**里，框架通过它读取数据。
+
+**工作目录解析优先级**：`ANYCLI_WORKSPACE` 环境变量 > `~/.anycli/config.json` 的 `workspace` 字段 > `~/.anycli`（默认）。
+
+### 默认工作目录（~/.anycli）
+
+默认工作目录就是 `~/.anycli`，框架首次运行自动创建，配置与产出天然在一起：
 
 ```
-~/.anycli（默认 Workspace，配置与产出统一，可直接纳入 git 管理）
+~/.anycli（默认 Workspace，配置与产出统一）
 ├── config.json                  # 配置（Profile、网关、登录 URL、认证）
 ├── apis/{project}/{module}.json # 接口注册表
 ├── skills/{project}/            # 生成的 Skill 与流程
@@ -49,36 +57,25 @@ anycli request cli-anything-x POST /api/example --body '{}'  # 调用业务接�
 
 框架随包自带两个合成内容用于开箱体验：`skills/anycli`（主入口 Skill）与 `skills/demo`（示例项目），它们只读、不随业务数据混在一起。
 
-**Workspace 解析优先级**：`ANYCLI_WORKSPACE` 环境变量 > `~/.anycli/config.json` 的 `workspace` 字段 > `~/.anycli`（默认）。
-
-### 新用户拉取代码后，如何创建与关联
-
-**方式一：开箱即用（体验）** —— 什么都不用配
+新用户拉取代码后：
 
 ```bash
 npm install -g cli-anything-x     # 全局安装（skills/anycli、skills/demo 随包发布）
 anycli config init                # 首次运行自动创建 ~/.anycli，交互式完成配置
+anycli init <project>             # 一键接入业务系统，生成 ~/.anycli/apis/{project}/、~/.anycli/skills/{project}/
 anycli skill install              # 安装技能到 ~/.agents/skills/
-anycli skill list                 # 查看技能
 ```
 
-**方式二：把 `~/.anycli` 当作工作目录（默认推荐）**
+### 团队协作 / 私有数据仓（指定工作目录）
 
-`~/.anycli` 既是配置目录、也是业务数据目录，产出与配置天然在一起。把整个目录纳入 git 即可版本化：
+建一个**私有数据仓**，内容即工作目录（`config.json`、`apis/`、`skills/`、`src/projects/` 平铺在仓库根即可）。克隆到本地后，在 `config.json` 中指定其路径作为工作目录（或设 `ANYCLI_WORKSPACE` 环境变量），即可多机共享同一套业务数据：
 
 ```bash
-anycli init <project>            # 一键接入业务系统，自动生成 ~/.anycli/apis/{project}/、~/.anycli/skills/{project}/
-git init ~/.anycli               # 把工作目录纳入版本管理（可选，建议做）
-anycli skill install             # 安装技能到 ~/.agents/skills/
+git clone <私有数据仓> /path/to/workspace
+anycli config set workspace /path/to/workspace   # 或 export ANYCLI_WORKSPACE=/path/to/workspace
 ```
 
-> 想改用独立目录？设环境变量 `ANYCLI_WORKSPACE=/path/to/workspace`，或 `anycli config set workspace /path/to/workspace`。
-
-**方式三：团队协作 / 私有数据仓形态（推荐用于团队）**
-
-1. 建一个**私有数据仓**，内容即工作目录：`config.json`、`apis/`、`skills/`、`src/projects/` 平铺在仓库根即可（也可按 `workspace/` 子目录组织，配合 `ANYCLI_WORKSPACE` 指向）。
-2. 克隆到本地，用 `ANYCLI_WORKSPACE` 指向该目录（或 `anycli config set workspace`），即可多机共享同一套业务数据。
-3. 框架仓保持干净（只含代码与合成示例），业务数据在私有仓独立演进、独立权限，不随框架版本漂移。
+`config.json` 含本机会话凭证，建议加入 `.gitignore` 不入库。框架仓保持干净（只含代码与合成示例），业务数据在私有仓独立演进、独立权限。
 
 ## 文档
 
