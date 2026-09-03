@@ -1,0 +1,53 @@
+{
+  "name": "cli-anything-x",
+  "version": "0.1.8",
+  "description": "CLI-Anything-X - 通用 Agent-Friendly CLI：系统CLI化、流程Skill化，可插拔鉴权与多语言解析（命令: anycli）",
+  "type": "module",
+  "bin": {
+    "anycli": "./bin/anycli.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "bin",
+    "dist",
+    "skills",
+    "tools/editor",
+    "tools/flow-editor",
+    "tools/lens-extension"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "lint": "eslint src/",
+    "prepublishOnly": "npm run build",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "cli",
+    "anycli",
+    "agent",
+    "framework",
+    "open-source"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^12.1.0",
+    "chalk": "^5.3.0",
+    "ora": "^8.0.1",
+    "inquirer": "^9.2.12",
+    "conf": "^12.0.0",
+    "open": "^10.1.0",
+    "cli-table3": "^0.6.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "tsx": "^4.16.0",
+    "@types/node": "^20.14.0",
+    "@types/inquirer": "^9.0.7",
+    "vitest": "^3.2.1"
+  }
+}

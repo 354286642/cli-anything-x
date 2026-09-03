@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- 页面可能在 /flow/{id} 路径下提供，相对资源统一解析到 /flow-editor/（两个服务端均支持该前缀） -->
+  <base href="/flow-editor/">
+  <title>CLI-Anything-X 工作流编辑器</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%234257E0' d='M12 2l8.66 5v10L12 22l-8.66-5V7z'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./editor.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ═══════════ 顶部工具栏 ═══════════ -->
+    <header id="toolbar">
+      <div class="toolbar-left">
+        <span class="app-logo"><span class="logo-mark">⬡</span><b>CLI-Anything-X</b><span class="logo-sub">Flow</span></span>
+        <select id="workflow-select" title="选择工作流">
+          <option value="">—— 选择工作流 ——</option>
+        </select>
+        <button id="btn-reload-list" class="btn-icon" title="刷新工作流列表">⟳</button>
+        <button id="btn-new" class="btn">＋ 新建</button>
+        <button id="btn-save" class="btn btn-primary" disabled>保存</button>
+        <button id="btn-build" class="btn" disabled>编译</button>
+      </div>
+      <div class="toolbar-right">
+        <button id="btn-theme" class="btn-icon" title="切换浅色 / 深色主题">☀</button>
+        <span class="toolbar-sep"></span>
+        <button id="btn-undo" class="btn-icon" title="撤销 (Ctrl+Z)" disabled>↶</button>
+        <button id="btn-redo" class="btn-icon" title="重做 (Ctrl+Y)" disabled>↷</button>
+        <span class="toolbar-sep"></span>
+        <button id="btn-toggle-preview" class="btn">◧ 预览面板</button>
+        <span id="save-status" class="status status-saved">● 已保存</span>
+      </div>
+    </header>
+
+    <!-- ═══════════ 三栏主体 ═══════════ -->
+    <div id="main">
+
+      <!-- 左侧导航 -->
+      <nav id="sidebar">
+        <div class="nav-group" data-group="basic">
+          <div class="nav-group-title">基本</div>
+          <div class="nav-items">
+            <a class="nav-item active" data-view="meta">基本信息</a>
+            <a class="nav-item" data-view="prerequisites">前置条件</a>
+            <a class="nav-item" data-view="success">成功标准</a>
+          </div>
+        </div>
+        <div class="nav-group" data-group="flow">
+          <div class="nav-group-title">流程</div>
+          <div class="nav-items">
+            <a class="nav-item" data-view="steps">流程步骤</a>
+            <a class="nav-item" data-view="fields">字段定义</a>
+            <a class="nav-item" data-view="apis">接口列表</a>
+          </div>
+        </div>
+        <div class="nav-group" data-group="speech">
+          <div class="nav-group-title">话术</div>
+          <div class="nav-items">
+            <a class="nav-item" data-view="speech">话术模板</a>
+            <a class="nav-item" data-view="strategy">引导策略</a>
+          </div>
+        </div>
+        <div class="nav-group" data-group="appendix">
+          <div class="nav-group-title">附录</div>
+          <div class="nav-items">
+            <a class="nav-item" data-view="errors">错误处理</a>
+            <a class="nav-item" data-view="knowledge">领域知识</a>
+            <a class="nav-item" data-view="reference">参考文件</a>
+          </div>
+        </div>
+        <div class="sidebar-footer" id="sidebar-footer">未加载工作流</div>
+      </nav>
+
+      <!-- 主编辑区 -->
+      <main id="editor">
+
+        <!-- 空状态 -->
+        <div id="empty-state" class="view active">
+          <div class="empty-inner">
+            <div class="empty-glyph">⬡</div>
+            <h2>工作流可视化编辑器</h2>
+            <p>编辑 <code>flow.json</code>，实时预览编译出的 SKILL.md。</p>
+            <p class="empty-hint">从左上角下拉框选择一个工作流，或点击「＋ 新建」创建。</p>
+          </div>
+        </div>
+
+        <!-- 视图：基本信息 -->
+        <section id="view-meta" class="view">
+          <h2 class="view-title">基本信息</h2>
+          <p class="view-intro"><b>工作流的「身份证」。</b>名称、标题、描述、触发词决定它如何被识别与路由；溯源信息记录对应的后端接口与前端页面，便于回溯。</p>
+          <div class="form-grid">
+            <label class="field">
+              <span class="field-label">工作流 ID（meta.name）</span>
+              <input type="text" id="f-name" placeholder="flow-demo-create-sample">
+            </label>
+            <label class="field">
+              <span class="field-label">文档标题（title）</span>
+              <input type="text" id="f-title" placeholder="创建样品需求（样品申请）">
+            </label>
+            <label class="field field-span2">
+              <span class="field-label">描述（meta.description）</span>
+              <input type="text" id="f-description" placeholder="业务流程：一句话描述业务目标">
+            </label>
+            <label class="field field-span2">
+              <span class="field-label">触发词（triggers，逗号分隔）</span>
+              <input type="text" id="f-triggers" placeholder="创建样品需求, 样品申请">
+            </label>
+          </div>
+
+          <h3 class="section-sub">溯源信息（sourceRefs）</h3>
+          <div class="form-grid">
+            <label class="field field-span2">
+              <span class="field-label">Controller</span>
+              <input type="text" id="f-ref-controller" placeholder="com.xxx.Controller#create">
+            </label>
+            <label class="field field-span2">
+              <span class="field-label">DTO</span>
+              <input type="text" id="f-ref-dto" placeholder="com.xxx.dto.command.CreateCmd">
+            </label>
+            <label class="field field-span2">
+              <span class="field-label">前端路径</span>
+              <input type="text" id="f-ref-frontend" placeholder="/kol#/sampleManagement/xxx">
+            </label>
+          </div>
+
+          <h3 class="section-sub">业务目标（businessGoal）</h3>
+          <textarea id="f-business-goal" class="mono-area" rows="4" placeholder="用业务语言描述要达成什么，而非「调某个接口」"></textarea>
+
+          <h3 class="section-sub">适用场景（scenarios）</h3>
+          <div id="list-scenarios" class="string-list"></div>
+          <button class="btn btn-ghost" data-add-to="scenarios">＋ 添加场景</button>
+
+          <h3 class="section-sub">流程结束接口调用示例</h3>
+          <textarea id="f-submit-command" class="mono-area" rows="6" placeholder="anycli request demo POST /api/xxx --body '{...}'"></textarea>
+        </section>
+
+        <!-- 视图：前置条件 -->
+        <section id="view-prerequisites" class="view">
+          <h2 class="view-title">前置条件</h2>
+          <p class="view-intro"><b>执行流程前必须满足的条件。</b>如已登录系统、项目已配置、依赖数据已存在等，可拖拽排序。</p>
+          <div id="list-prerequisites" class="string-list sortable-list"></div>
+          <button class="btn btn-ghost" data-add-to="prerequisites">＋ 添加前置条件</button>
+        </section>
+
+        <!-- 视图：成功标准 -->
+        <section id="view-success" class="view">
+          <h2 class="view-title">成功标准</h2>
+          <p class="view-intro"><b>如何判定流程执行成功。</b>如接口返回预期数据、页面跳转到目标页等，逐条列出，可拖拽排序。</p>
+          <div id="list-successCriteria" class="string-list sortable-list"></div>
+          <button class="btn btn-ghost" data-add-to="successCriteria">＋ 添加成功标准</button>
+        </section>
+
+        <!-- 视图：流程步骤 -->
+        <section id="view-steps" class="view">
+          <h2 class="view-title">流程步骤</h2>
+          <p class="view-intro"><b>把业务拆成有序的步骤卡片。</b>顶层是大卡片，点标题展开后可编辑详情；需要细分时在卡片内「添加子步骤」。某一步仅在特定条件下执行？填写「触发条件」，卡片会出现 <span class="hl-orange">橙色标记</span> 与「当 …」标签。拖动卡片左侧的 <span class="hl">⠿ 手柄</span> 即可调整顺序。</p>
+          <div class="steps-actions">
+            <span class="steps-action-tooltip" tabindex="0" data-tooltip="从已有 Skill 或 API 注册表选择接口，按顺序生成流程步骤、字段和建议的流程结束接口。">
+              <button id="btn-open-compose" class="btn btn-primary">从已有 Skill/API 生成步骤</button>
+            </span>
+            <span class="steps-action-tooltip" tabindex="0" data-tooltip="确认流程结束接口后，本地 Agent 会反向分析必填参数、校验与依赖，生成可预览、可追问的流程提案。">
+              <button id="btn-open-enhance" class="btn" disabled>完善流程</button>
+            </span>
+          </div>
+          <div id="steps-container"></div>
+        </section>
+
+        <!-- 视图：字段定义 -->
+        <section id="view-fields" class="view">
+          <h2 class="view-title">字段定义</h2>
+          <p class="view-intro"><b>表单所有字段的「字典」。</b>在这里定义每个字段的名称、类型、是否必填、显示条件、值来源与含义。步骤通过「关联字段」引用它们，编译器据此生成 SKILL.md 的字段表与字段依赖图。上方标签切换分组，「表格 / 依赖图」切换视图。</p>
+          <div class="tab-bar" id="fieldgroup-tabs"></div>
+          <div class="tab-bar tab-bar-secondary">
+            <button class="tab active" data-fieldtab="table">表格</button>
+            <button class="tab" data-fieldtab="graph">依赖图</button>
+          </div>
+          <div id="fields-table-wrap"></div>
+          <div id="fields-graph-wrap" class="hidden"><pre id="fields-graph" class="dep-graph"></pre></div>
+        </section>
+
+        <!-- 视图：接口列表 -->
+        <section id="view-apis" class="view">
+          <h2 class="view-title">接口列表</h2>
+          <p class="view-intro"><b>流程用到的所有接口清单。</b>每个接口给定 ID、用途、方法、路径，步骤通过「关联接口」引用，卡片上会显示接口名称而非 ID。</p>
+          <div id="apis-table-wrap"></div>
+        </section>
+
+        <!-- 视图：话术模板 -->
+        <section id="view-speech" class="view">
+          <h2 class="view-title">话术模板</h2>
+          <p class="view-intro"><b>用户用一句自然语言触发整个流程。</b>每个模板是一张独立卡片，<code>【】</code> 内为可替换内容，方括号 <code>[]</code> 内的片段可省略。</p>
+          <div id="speech-container"></div>
+        </section>
+
+        <!-- 视图：引导策略 -->
+        <section id="view-strategy" class="view">
+          <h2 class="view-title">Agent 引导策略</h2>
+          <p class="view-intro"><b>告诉 Agent 如何引导用户填表。</b>哪些字段可预填、默认值从哪来、哪些必须追问、哪些行为被禁止，都在这里配置。</p>
+
+          <h3 class="section-sub">预填规则（prefillRules）</h3>
+          <p class="view-desc">字段 → 默认值来源 → 是否可改。预填后须回显并允许用户修改。</p>
+          <div id="prefill-table-wrap"></div>
+
+          <h3 class="section-sub">必须追问（mustAsk）</h3>
+          <p class="view-desc">无默认值、不可编造的字段，缺失时引导用户补充。</p>
+          <div id="list-mustAsk" class="string-list"></div>
+          <button class="btn btn-ghost" data-add-to="mustAsk">＋ 添加必问项</button>
+
+          <h3 class="section-sub">严禁行为（forbidden）</h3>
+          <p class="view-desc">如「随机生成」「测试数据」「随便填」等措辞或行为。</p>
+          <div id="list-forbidden" class="string-list"></div>
+          <button class="btn btn-ghost" data-add-to="forbidden">＋ 添加禁止项</button>
+        </section>
+
+        <!-- 视图：错误处理 -->
+        <section id="view-errors" class="view">
+          <h2 class="view-title">错误处理</h2>
+          <p class="view-intro"><b>出错时怎么办。</b>列出错误码或异常场景，以及对应的恢复动作（如重新登录、重试、提示用户）。</p>
+          <div id="errors-table-wrap"></div>
+        </section>
+
+        <!-- 视图：领域知识 -->
+        <section id="view-knowledge" class="view">
+          <h2 class="view-title">领域知识</h2>
+          <p class="view-intro"><b>补充的业务背景与「坑」。</b>字段词典摘要、边界规则、易错点，支持 Markdown 行内语法。</p>
+          <div id="list-domainKnowledge" class="string-list"></div>
+          <button class="btn btn-ghost" data-add-to="domainKnowledge">＋ 添加知识点</button>
+        </section>
+
+        <!-- 视图：参考文件 -->
+        <section id="view-reference" class="view">
+          <h2 class="view-title">参考文件</h2>
+          <p class="view-intro"><b>编译后写入 <code>reference/</code> 目录的三份附录。</b>字段字典、话术示例集、验证脚本。左侧编写，右侧实时渲染。</p>
+          <div class="ref-block">
+            <h3 class="section-sub">字段字典（reference/fields.md）</h3>
+            <div class="ref-split">
+              <textarea id="ref-fields" class="mono-area" spellcheck="false"></textarea>
+              <div class="ref-preview markdown-body" id="ref-fields-preview"></div>
+            </div>
+          </div>
+          <div class="ref-block">
+            <h3 class="section-sub">话术示例集（reference/examples.md）</h3>
+            <div class="ref-split">
+              <textarea id="ref-examples" class="mono-area" spellcheck="false"></textarea>
+              <div class="ref-preview markdown-body" id="ref-examples-preview"></div>
+            </div>
+          </div>
+          <div class="ref-block">
+            <h3 class="section-sub">验证脚本（reference/verify.md）</h3>
+            <div class="ref-split">
+              <textarea id="ref-verify" class="mono-area" spellcheck="false"></textarea>
+              <div class="ref-preview markdown-body" id="ref-verify-preview"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <!-- 右侧预览面板 -->
+      <aside id="preview">
+        <div class="preview-head">
+          <div class="preview-tabs">
+            <button class="preview-tab active" data-ptab="rendered">渲染</button>
+            <button class="preview-tab" data-ptab="source">源码</button>
+          </div>
+          <div class="preview-head-actions"><button id="btn-expand-preview" class="btn-icon" title="展开/收缩预览面板（加宽一倍）">⤢</button><button id="btn-copy-source" class="btn-icon" title="复制 Markdown 源码">⧉</button></div>
+        </div>
+        <div id="preview-rendered" class="markdown-body"></div>
+        <div id="preview-source" class="hidden"><pre id="preview-source-code"></pre></div>
+        <div id="preview-empty" class="preview-empty">加载工作流后此处显示 SKILL.md 预览</div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- 新建工作流弹窗 -->
+  <div id="modal-new" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>新建工作流</h3>
+      <p class="view-desc">将创建 <code>skills/{project}/flows/{business}/flow.json</code></p>
+      <label class="field">
+        <span class="field-label">项目组（project）</span>
+        <input type="text" id="new-project" placeholder="demo">
+      </label>
+      <label class="field">
+        <span class="field-label">业务名（business）</span>
+        <input type="text" id="new-business" placeholder="create-sample-requirement">
+      </label>
+      <div class="modal-actions">
+        <button id="btn-new-cancel" class="btn">取消</button>
+        <button id="btn-new-confirm" class="btn btn-primary">创建</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 从已有 Skill/API 生成流程步骤 -->
+  <div id="modal-compose" class="modal-overlay hidden">
+    <div class="modal modal-compose">
+      <div class="modal-head">
+        <div>
+          <h3>从已有 Skill/API 生成流程步骤</h3>
+          <p class="view-desc">选择多个接口并调整顺序，生成后会同时写入流程步骤和接口列表。</p>
+        </div>
+        <button id="btn-compose-close" class="btn-icon" title="关闭">✕</button>
+      </div>
+      <div class="compose-grid">
+        <div>
+          <h3 class="section-sub">项目内 Skill/API</h3>
+          <div id="skill-catalog" class="skill-catalog"><p class="view-desc">正在加载接口目录…</p></div>
+        </div>
+        <div>
+          <h3 class="section-sub">已选择的执行步骤</h3>
+          <div id="compose-selected" class="compose-selected"><p class="view-desc">尚未选择接口。</p></div>
+          <button id="btn-compose-generate" class="btn btn-primary" disabled>生成流程步骤</button>
+          <p class="view-desc">生成会替换当前步骤、接口列表和建议的流程结束接口，请先保存已有编辑内容或确认覆盖。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 以流程结束接口反推的本地 Agent 完善会话 -->
+  <div id="modal-enhance" class="modal-overlay hidden">
+    <div class="modal modal-compose">
+      <div class="modal-head">
+        <div><h3>完善流程</h3><p class="view-desc">确认流程结束接口后，本地 Agent 会反向追溯必填参数、校验和上游来源。</p></div>
+        <button id="btn-enhance-close" class="btn-icon" title="关闭（会话会保留）">✕</button>
+      </div>
+      <div class="form-grid">
+        <label class="field field-span2"><span class="field-label">流程结束接口（可为查询、校验或写入）</span><select id="enhance-end-api"></select></label>
+        <label class="field field-span2"><span class="field-label">业务目标补充（可选）</span><textarea id="enhance-business-goal" class="mono-area" rows="3" placeholder="例如：为指定客户创建样品需求，提交后需要确认收货地址与商品明细，并能查询审核状态。可说明流程要达成的结果、关键对象、范围或成功标准。"></textarea><span class="field-hint">写 1–3 句话即可；不必罗列接口或字段。该内容仅作为本次 Agent 分析的上下文，不会自动覆盖正式业务目标。</span></label>
+      </div>
+      <div class="view-actions" style="margin:12px 0"><button id="btn-enhance-start" class="btn btn-primary">开始反向分析</button><button id="btn-enhance-cancel" class="btn btn-danger hidden">取消本次会话</button></div>
+      <div id="enhance-status" class="view-desc"></div>
+      <pre id="enhance-log" class="dep-graph" style="max-height:220px;overflow:auto"></pre>
+      <div id="enhance-question" class="hidden"></div>
+      <div id="enhance-proposal" class="hidden">
+        <h3 class="section-sub">提案预览</h3><pre id="enhance-proposal-content" class="dep-graph" style="max-height:260px;overflow:auto"></pre>
+        <div class="view-actions"><button id="btn-enhance-apply" class="btn btn-primary">应用提案到编辑器</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="./vendor/sortable.min.js"></script>
+  <script src="./vendor/marked.min.js"></script>
+  <script src="./editor.js"></script>
+</body>
+</html>

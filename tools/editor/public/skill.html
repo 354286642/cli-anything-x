@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="zh-CN" x-data="skillEditor()" x-init="init()">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Skill Editor - CLI-Anything-X</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%234257E0' d='M12 2l8.66 5v10L12 22l-8.66-5V7z'/%3E%3C/svg%3E">
+  <script>
+    document.documentElement.setAttribute('data-theme', localStorage.getItem('anycli-editor-theme') === 'dark' ? 'dark' : 'light');
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/flow-editor/editor.css">
+  <link rel="stylesheet" href="/portal.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="/vendor/marked.min.js"></script>
+</head>
+<body>
+  <div id="app">
+
+    <!-- ═══════════ 顶部工具栏 ═══════════ -->
+    <header id="toolbar">
+      <div class="toolbar-left">
+        <a href="/" class="btn-icon" title="返回门户" style="text-decoration:none">←</a>
+        <span class="app-logo"><span class="logo-mark">⬡</span><b>CLI-Anything-X</b><span class="logo-sub">Skill</span></span>
+        <span class="skill-title" x-text="registry?.module || '加载中…'"></span>
+        <span class="badge badge-blue" x-text="'v' + (registry?.version || '')"></span>
+        <span class="status" :class="dirty ? 'status-dirty' : 'status-saved'" x-text="dirty ? '未保存' : '已保存'"></span>
+      </div>
+      <div class="toolbar-right">
+        <button class="btn" @click="preview()" :disabled="previewing">
+          <span x-show="!previewing">预览</span><span x-show="previewing">生成中…</span>
+        </button>
+        <button class="btn" @click="build()" :disabled="building">
+          <span x-show="!building">Build</span><span x-show="building">编译中…</span>
+        </button>
+        <button class="btn btn-primary" @click="save()" :disabled="saving || !dirty">
+          <span x-show="!saving">保存</span><span x-show="saving">保存中…</span>
+        </button>
+        <span class="export-action" data-tooltip="普通版：下载自包含技能包。使用者需要按包内说明配置 sessionId，适合手动交付或独立使用。">
+          <button class="btn" @click="exportStandalone()" aria-label="可执行技能包下载">可执行技能包下载</button>
+        </span>
+        <span class="export-action" data-tooltip="飞书版：下载通过 MCP 获取 sessionId 的技能包。每次调用前动态获取，不要求手填或持久化 sessionId。">
+          <button class="btn" @click="exportFeishuStandalone()" aria-label="飞书执行技能包下载">飞书执行技能包下载</button>
+        </span>
+        <span class="toolbar-sep"></span>
+        <button class="btn-icon" title="切换浅色 / 深色主题" @click="darkMode = !darkMode" x-text="darkMode ? '☀' : '☾'"></button>
+      </div>
+    </header>
+
+    <!-- Toast -->
+    <div id="toast" class="toast" :class="toastType === 'error' ? 'toast-error' : 'toast-success'"
+      x-show="toast" x-cloak x-text="toast"></div>
+
+    <!-- ═══════════ 三栏主体 ═══════════ -->
+    <div id="main">
+
+      <!-- 左侧导航 -->
+      <nav id="sidebar">
+        <div class="nav-group">
+          <div class="nav-group-title">基本</div>
+          <div class="nav-items">
+            <a class="nav-item" :class="{ active: editorTab === 'meta' }" @click="editorTab = 'meta'">基本信息</a>
+          </div>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">接口</div>
+          <div class="nav-items">
+            <a class="nav-item" :class="{ active: editorTab === 'apis' }" @click="editorTab = 'apis'">接口列表</a>
+            <a class="nav-item" :class="{ active: editorTab === 'enums' }" @click="editorTab = 'enums'">共享枚举</a>
+          </div>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">扩展</div>
+          <div class="nav-items">
+            <a class="nav-item" :class="{ active: editorTab === 'custom' }" @click="editorTab = 'custom'">自定义区</a>
+            <a class="nav-item" :class="{ active: editorTab === 'json' }" @click="editorTab = 'json'">JSON 源码</a>
+          </div>
+        </div>
+        <div class="nav-group">
+          <div class="nav-group-title">工具</div>
+          <div class="nav-items">
+            <a class="nav-item" :class="{ active: editorTab === 'test' }" @click="editorTab = 'test'">接口测试</a>
+          </div>
+        </div>
+        <div class="sidebar-footer" x-text="project + '/' + module"></div>
+      </nav>
+
+      <!-- 主编辑区 -->
+      <main id="editor">
+
+        <!-- 视图：基本信息 -->
+        <section class="view" :class="{ active: editorTab === 'meta' }">
+          <h2 class="view-title">基本信息</h2>
+          <p class="view-intro"><b>技能的「身份证」。</b>模块 ID、版本、描述与触发词决定它如何被识别与路由；引用枚举可复用 <code>apis/&lt;project&gt;/_shared/</code> 下的共享枚举。</p>
+          <div class="form-grid">
+            <label class="field">
+              <span class="field-label">模块 ID</span>
+              <input type="text" x-model="registry.module" readonly style="opacity:0.6">
+            </label>
+            <label class="field">
+              <span class="field-label">版本</span>
+              <input type="text" x-model="registry.version" @input="dirty = true" placeholder="1.0.0">
+            </label>
+            <label class="field field-span2">
+              <span class="field-label">描述</span>
+              <textarea x-model="registry.description" @input="dirty = true" rows="2"></textarea>
+            </label>
+            <label class="field field-span2">
+              <span class="field-label">触发词（逗号分隔）</span>
+              <input type="text" :value="(registry.triggers || []).join(', ')" @input="registry.triggers = $event.target.value.split(',').map(s => s.trim()).filter(Boolean); dirty = true">
+            </label>
+            <label class="field field-span2">
+              <span class="field-label">引用枚举（逗号分隔）</span>
+              <input type="text" :value="(registry.enumRefs || []).join(', ')" @input="registry.enumRefs = $event.target.value.split(',').map(s => s.trim()).filter(Boolean); dirty = true">
+            </label>
+          </div>
+        </section>
+
+        <!-- 视图：接口列表 -->
+        <section class="view" :class="{ active: editorTab === 'apis' }">
+          <h2 class="view-title">接口列表</h2>
+          <p class="view-intro"><b>本模块维护的全部接口清单。</b>点击卡片标题展开编辑详情；方法、路径与分级会编译进 SKILL.md 的接口路由表。</p>
+          <div class="view-actions-row">
+            <span class="count-note" x-text="(registry.apis || []).length + ' 个接口'"></span>
+            <button class="btn" style="margin-left:auto" @click="enrichBatch()" :disabled="enriching">
+              <span x-show="!enriching">批量强化</span><span x-show="enriching" x-cloak>强化中…</span>
+            </button>
+          </div>
+          <div class="api-list">
+            <template x-for="(api, idx) in registry.apis" :key="api.id || idx">
+              <div class="step-card" :class="{ open: openApi === idx }">
+                <div class="step-head" @click="openApi = openApi === idx ? null : idx">
+                  <span class="step-num" :class="methodClass(api.method)" x-text="api.method"></span>
+                  <span class="step-title-text" style="font-family:var(--font-mono);font-size:13px" x-text="api.id || '（未命名接口）'"></span>
+                  <span class="step-badges">
+                    <span class="badge" :class="levelClass(api.level)" x-text="api.level"></span>
+                  </span>
+                  <span class="step-cond-tag" style="color:var(--teal);background:var(--teal-soft)" x-text="api.path"></span>
+                  <span class="badge badge-blue" x-show="api.enrichment" x-cloak :title="(api.enrichment && api.enrichment.summary) || ''" x-text="'已强化·' + ((api.enrichment && api.enrichment.confidence) || '')"></span>
+                  <button class="btn" style="padding:2px 8px;font-size:12px" @click.stop="enrichApi(api)" :disabled="enriching">强化</button>
+                  <button class="btn btn-danger" style="padding:2px 8px;font-size:12px" @click.stop="removeApi(idx)">删除</button>
+                  <span class="step-caret">▶</span>
+                </div>
+                <div class="step-body" x-show="openApi === idx" x-cloak>
+                  <div class="form-grid">
+                    <label class="field">
+                      <span class="field-label">接口 ID</span>
+                      <input type="text" x-model="api.id" @input="dirty = true" placeholder="api-id" style="font-family:var(--font-mono)">
+                    </label>
+                    <label class="field">
+                      <span class="field-label">摘要</span>
+                      <input type="text" x-model="api.summary" @input="dirty = true">
+                    </label>
+                    <label class="field field-span2">
+                      <span class="field-label">路径</span>
+                      <input type="text" x-model="api.path" @input="dirty = true" style="font-family:var(--font-mono)">
+                    </label>
+                    <label class="field">
+                      <span class="field-label">方式</span>
+                      <select x-model="api.method" @change="dirty = true">
+                        <option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option><option>PATCH</option>
+                      </select>
+                    </label>
+                    <label class="field">
+                      <span class="field-label">分级</span>
+                      <select x-model="api.level" @change="dirty = true">
+                        <option value="read">read</option><option value="write">write</option><option value="dangerous">dangerous</option>
+                      </select>
+                    </label>
+                    <label class="field field-span2">
+                      <span class="field-label">注意事项</span>
+                      <input type="text" x-model="api.notes" @input="dirty = true" placeholder="可选">
+                    </label>
+                    <label class="field field-span2">
+                      <span class="field-label">bodyTemplate (JSON)</span>
+                      <textarea x-model="api._bodyTemplateStr" @input="syncBodyTemplate(api); dirty = true" rows="3" placeholder='{"pageNum":1}'></textarea>
+                    </label>
+                    <label class="field field-span2">
+                      <span class="field-label">输出字段说明</span>
+                      <input type="text" x-model="api.outputFields" @input="dirty = true">
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+          <button class="add-bar" @click="addApi()">
+            <span class="add-bar-icon">＋</span> 添加接口
+          </button>
+          <div x-show="enrichLog.length > 0" x-cloak style="margin-top:12px">
+            <div class="view-actions-row">
+              <span class="count-note">强化日志（codex 分析 service 链路）<span x-show="enriching" x-cloak x-text="' ⏱ ' + enrichElapsed + (enrichStatus ? ' · ' + enrichStatus : '')"></span></span>
+              <button class="btn" style="padding:2px 8px;font-size:12px;margin-left:auto" @click="enrichLog = []">清空</button>
+            </div>
+            <pre style="max-height:240px;overflow:auto;font-size:12px;line-height:1.6;border:1px solid var(--border,#e3e6ef);border-radius:8px;padding:10px;margin:8px 0 0;white-space:pre-wrap" x-text="enrichLog.join('\n')"></pre>
+          </div>
+        </section>
+
+        <!-- 视图：共享枚举 -->
+        <section class="view" :class="{ active: editorTab === 'enums' }">
+          <h2 class="view-title">共享枚举</h2>
+          <p class="view-intro"><b>来自 <code>apis/<span x-text="project"></span>/_shared/</code> 的共享枚举。</b>只读展示，供接口参数取值参考；修改请到对应 JSON 文件。</p>
+          <div id="speech-container">
+            <template x-for="en in sharedEnums" :key="en.name || en.file">
+              <div class="speech-card">
+                <div class="card-head"><b x-text="en.description || en.name || en.file"></b></div>
+                <div class="pc-tags">
+                  <template x-for="v in en.values" :key="v.value">
+                    <span class="chip" x-text="v.value + ' = ' + v.label"></span>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+          <div class="empty-inline" x-show="sharedEnums.length === 0" x-cloak>暂无共享枚举</div>
+        </section>
+
+        <!-- 视图：自定义区 -->
+        <section class="view" :class="{ active: editorTab === 'custom' }">
+          <h2 class="view-title">自定义区</h2>
+          <p class="view-intro"><b>人工补充区，原样输出到 SKILL.md。</b>用于沉淀接口清单之外的经验、坑位与约定。</p>
+          <div id="speech-container">
+            <template x-for="(sec, idx) in (registry.customSections || [])" :key="idx">
+              <div class="speech-card">
+                <div class="card-head">
+                  <b>SECTION <span x-text="idx + 1"></span></b>
+                  <button class="btn btn-danger" style="padding:2px 8px;font-size:12px" @click="registry.customSections.splice(idx, 1); dirty = true">删除</button>
+                </div>
+                <div class="field" style="margin-bottom:10px">
+                  <span class="field-label">标题</span>
+                  <input type="text" x-model="sec.title" @input="dirty = true" placeholder="Section 标题">
+                </div>
+                <textarea class="mono-area" x-model="sec.content" @input="dirty = true" rows="6" placeholder="Markdown 内容" style="min-height:140px"></textarea>
+              </div>
+            </template>
+          </div>
+          <div class="empty-inline" x-show="(registry.customSections || []).length === 0" x-cloak>暂无自定义区</div>
+          <button class="add-bar" @click="addSection()">
+            <span class="add-bar-icon">＋</span> 添加自定义区
+          </button>
+        </section>
+
+        <!-- 视图：JSON 源码 -->
+        <section class="view" :class="{ active: editorTab === 'json' }">
+          <h2 class="view-title">JSON 源码</h2>
+          <p class="view-intro"><b>注册表原始 JSON。</b>直接编辑后实时回写到表单模型；语法错误会在下方提示。</p>
+          <textarea class="mono-area" x-model="jsonView" @input="applyJson()" rows="28" spellcheck="false" style="min-height:480px;max-width:980px"></textarea>
+          <p class="inline-error" x-show="jsonError" x-text="jsonError"></p>
+        </section>
+
+        <!-- 视图：接口测试 -->
+        <section class="view" :class="{ active: editorTab === 'test' }">
+          <h2 class="view-title">接口测试</h2>
+          <p class="view-intro"><b>不离开编辑器即可试调接口。</b>选择接口后自动带入 bodyTemplate，发送后查看原始响应。</p>
+          <div class="view-actions-row">
+            <select x-model="testApiId" @change="loadTestTemplate()" style="flex:1">
+              <option value="">选择接口…</option>
+              <template x-for="api in (registry.apis || [])" :key="api.id">
+                <option :value="api.id" x-text="api.id + ' — ' + api.summary"></option>
+              </template>
+            </select>
+            <button class="btn btn-primary" @click="runTest()" :disabled="testing || !testApiId">
+              <span x-show="!testing">发送</span><span x-show="testing">…</span>
+            </button>
+          </div>
+          <div class="field" x-show="testApiId" style="max-width:980px">
+            <span class="field-label">请求体 (JSON)</span>
+            <textarea class="mono-area" x-model="testBody" rows="6" spellcheck="false" placeholder='{"pageNum":1}'></textarea>
+          </div>
+          <div class="field" x-show="testResult !== null" style="max-width:980px;margin-top:16px">
+            <span class="field-label">响应</span>
+            <pre class="dep-graph test-response" x-text="testResult"></pre>
+          </div>
+        </section>
+      </main>
+
+      <!-- 右侧预览面板 -->
+      <aside id="preview">
+        <div class="preview-head">
+          <div class="preview-tabs">
+            <button class="preview-tab" :class="{ active: previewTab === 'rendered' }" @click="previewTab = 'rendered'">渲染</button>
+            <button class="preview-tab" :class="{ active: previewTab === 'source' }" @click="previewTab = 'source'">源码</button>
+          </div>
+          <div class="preview-head-actions">
+            <span class="char-note" x-text="previewMd ? previewMd.length + ' chars' : ''"></span>
+            <button class="btn-icon" title="复制 Markdown 源码" @click="copySource()">⧉</button>
+          </div>
+        </div>
+        <div id="preview-rendered" class="markdown-body" x-show="previewTab === 'rendered' && previewMd" x-html="renderedMd"></div>
+        <div id="preview-source" x-show="previewTab === 'source' && previewMd" x-cloak><pre x-text="previewMd"></pre></div>
+        <div class="preview-empty" x-show="!previewMd">点击右上角「预览」生成 SKILL.md</div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    function skillEditor() {
+      const pathParts = location.pathname.split('/').filter(Boolean);
+      const project = pathParts[1] || '';
+      const module = pathParts[2] || '';
+
+      return {
+        project, module,
+        registry: { module: '', version: '1.0.0', apis: [], triggers: [], customSections: [] },
+        sharedEnums: [],
+        editorTab: 'apis',
+        openApi: null,
+        previewTab: 'rendered',
+        darkMode: localStorage.getItem('anycli-editor-theme') === 'dark',
+        dirty: false,
+        saving: false,
+        building: false,
+        previewing: false,
+        enriching: false,
+        enrichLog: [],
+        enrichStatus: '',
+        enrichElapsed: '',
+        enrichStartedAt: 0,
+        _enrichTimer: null,
+        previewMd: '',
+        toast: '',
+        toastType: 'success',
+        jsonError: '',
+
+        get jsonView() {
+          const clean = JSON.parse(JSON.stringify(this.registry));
+          for (const api of (clean.apis || [])) delete api._bodyTemplateStr;
+          return JSON.stringify(clean, null, 2);
+        },
+        get renderedMd() {
+          if (!this.previewMd) return '';
+          return marked.parse(this.previewMd);
+        },
+
+        methodClass(m) {
+          return ({ GET: 'm-get', POST: 'm-post', PUT: 'm-put', DELETE: 'm-delete', PATCH: 'm-patch' })[m] || 'm-post';
+        },
+        levelClass(l) {
+          return ({ read: 'badge-green', write: 'badge-orange', dangerous: 'badge-red' })[l] || 'badge-blue';
+        },
+
+        async init() {
+          this.$watch('darkMode', (v) => {
+            localStorage.setItem('anycli-editor-theme', v ? 'dark' : 'light');
+            document.documentElement.setAttribute('data-theme', v ? 'dark' : 'light');
+          });
+          try {
+            const resp = await fetch(`/api/skills/${project}/${module}`);
+            const json = await resp.json();
+            if (json.success) {
+              this.registry = json.data.registry;
+              this.sharedEnums = json.data.sharedEnums || [];
+              for (const api of (this.registry.apis || [])) {
+                api._bodyTemplateStr = api.bodyTemplate ? (typeof api.bodyTemplate === 'string' ? api.bodyTemplate : JSON.stringify(api.bodyTemplate, null, 2)) : '';
+              }
+              if (!this.registry.customSections) this.registry.customSections = [];
+            }
+          } catch (err) { this.showToast('加载失败: ' + err.message, 'error'); }
+        },
+
+        syncBodyTemplate(api) {
+          try {
+            api.bodyTemplate = api._bodyTemplateStr ? JSON.parse(api._bodyTemplateStr) : undefined;
+          } catch { api.bodyTemplate = api._bodyTemplateStr; }
+        },
+
+        addApi() {
+          if (!this.registry.apis) this.registry.apis = [];
+          this.registry.apis.push({ id: '', summary: '', method: 'POST', path: '', level: 'read', _bodyTemplateStr: '' });
+          this.openApi = this.registry.apis.length - 1;
+          this.dirty = true;
+        },
+        removeApi(idx) { this.registry.apis.splice(idx, 1); this.dirty = true; },
+        addSection() {
+          if (!this.registry.customSections) this.registry.customSections = [];
+          this.registry.customSections.push({ title: '', content: '' });
+          this.dirty = true;
+        },
+
+        applyJson() {
+          try {
+            const parsed = JSON.parse(this.jsonView);
+            Object.assign(this.registry, parsed);
+            this.jsonError = '';
+            this.dirty = true;
+          } catch (err) { this.jsonError = err.message; }
+        },
+
+        async save() {
+          this.saving = true;
+          try {
+            const clean = JSON.parse(JSON.stringify(this.registry));
+            for (const api of (clean.apis || [])) delete api._bodyTemplateStr;
+            const resp = await fetch(`/api/skills/${project}/${module}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(clean),
+            });
+            const json = await resp.json();
+            if (json.success) { this.dirty = false; this.showToast('已保存'); }
+            else this.showToast(json.error || '保存失败', 'error');
+          } catch (err) { this.showToast('保存失败: ' + err.message, 'error'); }
+          this.saving = false;
+        },
+
+        async build() {
+          this.building = true;
+          try {
+            const resp = await fetch(`/api/skills/${project}/${module}/build`, { method: 'POST' });
+            const json = await resp.json();
+            if (json.success) { this.showToast('Build 成功'); this.preview(); }
+            else this.showToast(json.error || 'Build 失败', 'error');
+          } catch (err) { this.showToast('Build 失败: ' + err.message, 'error'); }
+          this.building = false;
+        },
+
+        // ── 可执行技能包下载（standalone-export：自包含 zip，不依赖 anycli CLI）──
+        async exportStandalone() {
+          await this.downloadStandalone('export', `${module}-executable.zip`, '可执行技能包');
+        },
+
+        async exportFeishuStandalone() {
+          await this.downloadStandalone('feishu-export', `${module}-feishu-executable.zip`, '飞书执行技能包');
+        },
+
+        async downloadStandalone(action, fallbackFilename, label) {
+          try {
+            const resp = await fetch(`/api/skills/${project}/${module}/${action}`);
+            if (!resp.ok) {
+              const json = await resp.json().catch(() => null);
+              this.showToast((json && json.error) || `下载失败 (HTTP ${resp.status})`, 'error');
+              return;
+            }
+            const blob = await resp.blob();
+            const disposition = resp.headers.get('Content-Disposition') || '';
+            const nameMatch = disposition.match(/filename="([^"]+)"/);
+            const filename = nameMatch ? nameMatch[1] : fallbackFilename;
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(a.href);
+            this.showToast(`${label}已开始下载（解压即得技能文件夹，可整体拷入 skills 目录使用）`);
+          } catch (err) { this.showToast('下载失败: ' + err.message, 'error'); }
+        },
+
+        async preview() {
+          this.previewing = true;
+          try {
+            const resp = await fetch(`/api/skills/${project}/${module}/preview`, { method: 'POST' });
+            const json = await resp.json();
+            if (json.success) this.previewMd = json.data.markdown;
+            else this.showToast(json.error || '预览失败', 'error');
+          } catch (err) { this.showToast('预览失败: ' + err.message, 'error'); }
+          this.previewing = false;
+        },
+
+        copySource() {
+          if (!this.previewMd) return;
+          navigator.clipboard.writeText(this.previewMd).then(
+            () => this.showToast('已复制 Markdown 源码'),
+            () => this.showToast('复制失败', 'error')
+          );
+        },
+
+        // ── 技能强化（skill-enrich：调用本地 codex 分析 service 链路）──
+        pushEnrichLog(line) {
+          const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+          this.enrichLog.push(`[${time}] ${line}`);
+          if (this.enrichLog.length > 200) this.enrichLog.splice(0, this.enrichLog.length - 200);
+        },
+
+        async ensureJavaSourceRoot() {
+          const resp = await fetch(`/api/projects/${project}/gen-config`);
+          const json = await resp.json();
+          let root = json.data?.javaSourceRoot;
+          if (!root) {
+            root = window.prompt('请输入该项目的 Java 源码根目录（保存到 apis/' + project + '/gen.json）', 'C:\\code\\sample-server');
+            if (!root) return null;
+            const saveResp = await fetch(`/api/projects/${project}/gen-config`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ javaSourceRoot: root.trim() }),
+            });
+            const saveJson = await saveResp.json();
+            if (!saveJson.success) {
+              this.showToast(saveJson.error || 'javaSourceRoot 保存失败', 'error');
+              return null;
+            }
+          }
+          return root;
+        },
+
+        enrichApi(api) { this.runEnrich({ apiId: api.id }); },
+
+        async enrichBatch() {
+          if (!window.confirm('将顺序强化本模块全部接口，每个接口约 2~6 分钟，确认继续？')) return;
+          await this.runEnrich({ batch: true });
+        },
+
+        async runEnrich(payload) {
+          if (this.enriching) return;
+          if (this.dirty && !window.confirm('存在未保存的编辑，强化会直接写注册表文件。仍要继续吗？')) return;
+          let root;
+          try {
+            root = await this.ensureJavaSourceRoot();
+          } catch (err) {
+            this.showToast('读取 gen-config 失败：' + err.message, 'error');
+            return;
+          }
+          if (!root) return;
+          this.enriching = true;
+          this.enrichStartedAt = Date.now();
+          this.enrichElapsed = '0s';
+          this.enrichStatus = '连接服务端…';
+          this._enrichTimer = setInterval(() => {
+            const secs = Math.round((Date.now() - this.enrichStartedAt) / 1000);
+            this.enrichElapsed = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
+          }, 1000);
+          this.pushEnrichLog(payload.batch ? '开始批量强化…' : `开始强化 ${payload.apiId}…`);
+          try {
+            const resp = await fetch(`/api/skills/${project}/${module}/enrich`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            if (!resp.ok || !resp.body) {
+              let msg = `HTTP ${resp.status}`;
+              try { msg = (await resp.json()).error || msg; } catch { /* ignore */ }
+              this.showToast(msg, 'error');
+              this.pushEnrichLog('失败：' + msg);
+              return;
+            }
+            await this.consumeSse(resp.body);
+          } catch (err) {
+            this.showToast('强化失败：' + err.message, 'error');
+            this.pushEnrichLog('失败：' + err.message);
+          } finally {
+            this.enriching = false;
+            if (this._enrichTimer) { clearInterval(this._enrichTimer); this._enrichTimer = null; }
+            this.enrichStatus = '';
+          }
+        },
+
+        async consumeSse(streamBody) {
+          const reader = streamBody.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          const handle = (event, data) => {
+            if (event === 'progress') {
+              const text = data.brief || data.message;
+              if (!text) return;
+              if (data.type === 'heartbeat') { this.enrichStatus = String(text); return; }
+              const tag = data.apiId ? `${data.apiId} ` : '';
+              this.enrichStatus = '';
+              this.pushEnrichLog(`${tag}${String(text).slice(0, 220)}`);
+            } else if (event === 'done') {
+              const api = (this.registry.apis || []).find((a) => a.id === data.apiId);
+              if (api) api.enrichment = data.enrichment;
+              this.pushEnrichLog(`✓ ${data.apiId} 强化完成（${data.enrichment?.confidence}）：${data.enrichment?.summary || ''}`);
+            } else if (event === 'error') {
+              this.pushEnrichLog(`✗ ${data.apiId || ''} ${data.message}`);
+              this.showToast(String(data.message || '强化失败'), 'error');
+            } else if (event === 'built') {
+              this.pushEnrichLog('技能产物已重建：' + data.rebuilt);
+            } else if (event === 'all-done' || event === 'aborted') {
+              this.pushEnrichLog(event === 'aborted'
+                ? `已中断（成功 ${data.enriched}/${data.total}）`
+                : `全部完成（成功 ${data.enriched}/${data.total}）`);
+              if (data.enriched > 0) this.showToast(`强化完成：${data.enriched} 个接口，技能已重建`);
+            }
+          };
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let sep;
+            while ((sep = buffer.indexOf('\n\n')) >= 0) {
+              const frame = buffer.slice(0, sep);
+              buffer = buffer.slice(sep + 2);
+              let event = 'message';
+              const dataLines = [];
+              for (const line of frame.split('\n')) {
+                if (line.startsWith('event:')) event = line.slice(6).trim();
+                else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+              }
+              if (dataLines.length === 0) continue;
+              try { handle(event, JSON.parse(dataLines.join('\n'))); } catch { /* ignore */ }
+            }
+          }
+        },
+
+        // 接口测试
+        testApiId: '',
+        testBody: '',
+        testResult: null,
+        testing: false,
+
+        loadTestTemplate() {
+          const api = (this.registry.apis || []).find(a => a.id === this.testApiId);
+          if (api && api.bodyTemplate) {
+            this.testBody = typeof api.bodyTemplate === 'string' ? api.bodyTemplate : JSON.stringify(api.bodyTemplate, null, 2);
+          } else if (api && api.queryTemplate) {
+            this.testBody = typeof api.queryTemplate === 'string' ? api.queryTemplate : JSON.stringify(api.queryTemplate, null, 2);
+          } else {
+            this.testBody = '{}';
+          }
+          this.testResult = null;
+        },
+
+        async runTest() {
+          const api = (this.registry.apis || []).find(a => a.id === this.testApiId);
+          if (!api) return;
+          this.testing = true;
+          this.testResult = null;
+          try {
+            let body, query;
+            const parsed = this.testBody ? JSON.parse(this.testBody) : {};
+            if (api.queryParams && api.queryParams.length > 0) { query = parsed; } else { body = parsed; }
+            const resp = await fetch('/api/test', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ project: this.project, method: api.method, path: api.path, body, query }),
+            });
+            const json = await resp.json();
+            this.testResult = JSON.stringify(json.data || json, null, 2);
+          } catch (err) {
+            this.testResult = 'Error: ' + err.message;
+          }
+          this.testing = false;
+        },
+
+        showToast(msg, type = 'success') {
+          this.toast = msg; this.toastType = type;
+          setTimeout(() => this.toast = '', 3000);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

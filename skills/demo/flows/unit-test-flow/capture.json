@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "networkLogs": [
+    {
+      "requestId": "req-1",
+      "url": "https://api.example.com/user/api/customer/enable",
+      "method": "POST",
+      "headers": {},
+      "postData": "{\"id\":10086}",
+      "responseBody": "{\"code\":\"0\"}",
+      "timestamp": 1788416331972,
+      "resourceType": "XHR"
+    }
+  ],
+  "dependencies": [],
+  "intentText": "单元测试意图",
+  "capturedAt": "2026-09-03T06:18:51.974Z"
+}

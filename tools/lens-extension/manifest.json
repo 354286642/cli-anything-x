@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "CLI-Anything-X Live Lens",
+  "version": "2.0.0",
+  "description": "CLI-Anything-X 浏览器双流对齐实时捕获扩展",
+  "permissions": [
+    "debugger",
+    "tabCapture",
+    "offscreen",
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:19877/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "CLI-Anything-X Live Lens 录制"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

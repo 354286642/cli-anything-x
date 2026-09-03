@@ -1,0 +1,417 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Anycli API Registry Module",
+  "description": "接口注册表模块文件 schema，每个 apis/{project}/{module}.json 遵循此结构",
+  "type": "object",
+  "required": [
+    "module",
+    "version",
+    "apis"
+  ],
+  "properties": {
+    "module": {
+      "type": "string",
+      "description": "模块逻辑 id，如 demo-order"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "模块版本号（semver）"
+    },
+    "description": {
+      "type": "string",
+      "description": "模块一句话描述"
+    },
+    "triggers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "触发词列表"
+    },
+    "enums": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "values"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "value",
+                "label"
+              ],
+              "properties": {
+                "value": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "description": "模块内枚举定义"
+    },
+    "enumRefs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "引用的共享枚举文件名（不含 .json 后缀）"
+    },
+    "apis": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/api"
+      }
+    },
+    "customSections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "title",
+          "content"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "人工补充的自由区 section，生成器原样输出"
+    },
+    "routing": {
+      "type": "object",
+      "properties": {
+        "priority": {
+          "type": "string",
+          "description": "路由优先级描述"
+        },
+        "keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "路由关键词"
+        },
+        "rule": {
+          "type": "string",
+          "description": "判定规则"
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "不在本模块范围的项"
+        }
+      },
+      "description": "路由优先级配置"
+    },
+    "principles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "执行原则列表"
+    },
+    "chains": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "steps"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "处理链（接口调用序列）"
+    },
+    "errorHandling": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "symptom": {
+            "type": "string"
+          },
+          "judgment": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "错误处理决策表"
+    }
+  },
+  "definitions": {
+    "api": {
+      "type": "object",
+      "required": [
+        "id",
+        "summary",
+        "method",
+        "path",
+        "level"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "稳定逻辑 id，flow apiRef 引用此值"
+        },
+        "summary": {
+          "type": "string",
+          "description": "接口用途一句话"
+        },
+        "method": {
+          "type": "string",
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "DELETE",
+            "PATCH"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "description": "接口路径"
+        },
+        "level": {
+          "type": "string",
+          "enum": [
+            "read",
+            "write",
+            "dangerous"
+          ],
+          "description": "操作分级"
+        },
+        "deprecated": {
+          "type": "boolean",
+          "default": false
+        },
+        "version": {
+          "type": "string",
+          "description": "接口引入版本"
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "controller": {
+              "type": "string"
+            },
+            "method": {
+              "type": "string"
+            },
+            "line": {
+              "type": "integer"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "description": "后端源码溯源（path 为 Controller 文件名）"
+        },
+        "queryParams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/param"
+          }
+        },
+        "bodyParams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/param"
+          }
+        },
+        "bodyTemplate": {
+          "type": [
+            "object",
+            "string"
+          ],
+          "description": "请求体模板（结构化对象或 JSON 字符串）"
+        },
+        "queryTemplate": {
+          "type": [
+            "object",
+            "string"
+          ],
+          "description": "查询参数模板"
+        },
+        "enumRefs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "本接口引用的枚举名"
+        },
+        "notes": {
+          "type": "string",
+          "description": "人工补充的注意事项/坑"
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "command": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "调用示例"
+        },
+        "outputFields": {
+          "type": "string",
+          "description": "输出关键字段说明（自由文本）"
+        },
+        "avoidWhen": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "何时不该用这个接口"
+        },
+        "prerequisites": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "前置条件"
+        },
+        "tips": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "使用提示/坑"
+        },
+        "paramSources": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "参数来源说明（字段名 → 来源）"
+        },
+        "enrichment": {
+          "type": "object",
+          "description": "技能强化：codex 分析 service 链路的结构化结果（anycli edit 强化功能写入，gen merge 不覆盖）",
+          "required": [
+            "enrichedAt",
+            "enrichedBy",
+            "confidence",
+            "summary"
+          ],
+          "properties": {
+            "enrichedAt": {
+              "type": "string"
+            },
+            "enrichedBy": {
+              "type": "string"
+            },
+            "controllerFile": {
+              "type": "string"
+            },
+            "confidence": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low"
+              ]
+            },
+            "summary": {
+              "type": "string"
+            },
+            "businessRules": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "validations": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "callChain": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "errorScenarios": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "param": {
+      "type": "object",
+      "required": [
+        "name",
+        "type"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "desc": {
+          "type": "string"
+        },
+        "default": {
+          "type": "string",
+          "description": "默认值（来自 @RequestParam defaultValue）"
+        }
+      }
+    }
+  }
+}

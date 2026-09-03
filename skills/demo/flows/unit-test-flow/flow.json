@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "meta": {
+    "name": "flow-demo-unit-test-flow",
+    "description": "单元测试意图",
+    "type": "flow",
+    "triggers": [
+      "自动执行 unit-test-flow",
+      "unit-test-flow"
+    ]
+  },
+  "title": "unit-test-flow 自动录制工作流",
+  "businessGoal": "单元测试意图",
+  "scenarios": [
+    "原系统 unit-test-flow 自动化流程"
+  ],
+  "prerequisites": [
+    "保持本地 Profile 会话有效"
+  ],
+  "steps": [
+    {
+      "id": "step1",
+      "title": "步骤 1: POST /user/api/customer/enable",
+      "level": 1,
+      "parentId": null,
+      "conditional": false,
+      "condition": null,
+      "dependsOn": [],
+      "fieldRefs": [],
+      "content": "调用接口 POST /user/api/customer/enable。"
+    }
+  ],
+  "fieldGroups": [],
+  "apis": [
+    {
+      "id": "demo/POST/user/api/customer/enable",
+      "purpose": "POST /user/api/customer/enable",
+      "method": "POST",
+      "path": "/user/api/customer/enable",
+      "description": "Live Lens 自动捕获接口 (https://api.example.com/user/api/customer/enable)",
+      "evidence": {
+        "source": "capture"
+      }
+    }
+  ],
+  "speechTemplates": [],
+  "agentStrategy": {
+    "prefillRules": [],
+    "mustAsk": [],
+    "forbidden": []
+  },
+  "endApi": {
+    "apiRef": "demo/POST/user/api/customer/enable",
+    "method": "POST",
+    "path": "/user/api/customer/enable",
+    "bodyTemplate": "{\"id\":10086}",
+    "evidenceSource": "capture"
+  },
+  "errorHandling": [],
+  "successCriteria": [
+    "链路上所有接口响应成功且符合契约"
+  ],
+  "domainKnowledge": [
+    "本流程通过 Live Lens 于 2026-09-03T06:18:51.980Z 捕获产出。"
+  ],
+  "reference": {
+    "fields": "",
+    "examples": "",
+    "verify": ""
+  }
+}

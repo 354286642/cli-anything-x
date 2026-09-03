@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN" x-data="portal()" x-init="init()">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CLI-Anything-X Editor</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%234257E0' d='M12 2l8.66 5v10L12 22l-8.66-5V7z'/%3E%3C/svg%3E">
+  <script>
+    document.documentElement.setAttribute('data-theme', localStorage.getItem('anycli-editor-theme') === 'dark' ? 'dark' : 'light');
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/flow-editor/editor.css">
+  <link rel="stylesheet" href="/portal.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body>
+  <div id="app">
+
+    <!-- ═══════════ 顶部工具栏 ═══════════ -->
+    <header id="toolbar">
+      <div class="toolbar-left">
+        <span class="app-logo"><span class="logo-mark">⬡</span><b>CLI-Anything-X</b><span class="logo-sub">Editor</span></span>
+        <div class="toolbar-search">
+          <svg class="search-glyph" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          <input type="text" x-model="search" @keydown.escape="search = ''" placeholder="搜索技能 / 流程…" x-ref="searchInput">
+          <span class="kbd-hint">/</span>
+        </div>
+      </div>
+      <div class="toolbar-right">
+        <button class="btn-icon" title="切换浅色 / 深色主题" @click="darkMode = !darkMode" x-text="darkMode ? '☀' : '☾'"></button>
+      </div>
+    </header>
+
+    <!-- ═══════════ 主内容 ═══════════ -->
+    <div id="editor">
+
+      <!-- 统计条 -->
+      <div class="stat-strip" x-show="!loading" x-cloak>
+        <div class="stat-cell">
+          <div class="stat-num c-accent" x-text="data.projects?.length || 0"></div>
+          <div class="stat-label">项目</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-num c-teal" x-text="data.skills?.length || 0"></div>
+          <div class="stat-label">原子 Skill</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-num c-blue" x-text="data.flows?.length || 0"></div>
+          <div class="stat-label">流程 Skill</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-num c-purple" x-text="totalApis"></div>
+          <div class="stat-label">接口总数</div>
+        </div>
+      </div>
+
+      <!-- 类型切换 -->
+      <div class="tabs">
+        <button class="tab" :class="{ active: tab === 'skills' }" @click="tab = 'skills'">原子 Skill</button>
+        <button class="tab" :class="{ active: tab === 'flows' }" @click="tab = 'flows'">流程 Skill</button>
+      </div>
+
+      <!-- 原子 Skill 卡片 -->
+      <div x-show="tab === 'skills' && !loading" x-cloak>
+        <div class="card-grid">
+          <template x-for="skill in filteredSkills" :key="skill.name">
+            <a class="portal-card" :href="`/skill/${skill.project}/${skill.module}`">
+              <div class="pc-head">
+                <span class="pc-name" x-text="skill.name"></span>
+                <span class="pc-ver" x-text="'v' + skill.version"></span>
+              </div>
+              <p class="pc-desc" x-text="skill.description"></p>
+              <div class="pc-meta">
+                <span class="badge badge-blue" x-text="skill.apiCount + ' 接口'"></span>
+                <span class="badge badge-green" x-show="skill.levels.read > 0" x-text="skill.levels.read + ' read'"></span>
+                <span class="badge badge-orange" x-show="skill.levels.write > 0" x-text="skill.levels.write + ' write'"></span>
+                <span class="badge badge-red" x-show="skill.levels.dangerous > 0" x-text="skill.levels.dangerous + ' dangerous'"></span>
+              </div>
+              <div class="pc-tags">
+                <template x-for="t in (skill.triggers || []).slice(0, 5)" :key="t">
+                  <span class="chip" x-text="t"></span>
+                </template>
+              </div>
+            </a>
+          </template>
+        </div>
+        <div class="empty-inline" x-show="filteredSkills.length === 0" x-cloak style="max-width:1240px">没有匹配的技能</div>
+      </div>
+
+      <!-- 流程 Skill 卡片 -->
+      <div x-show="tab === 'flows' && !loading" x-cloak>
+        <div class="card-grid">
+          <template x-for="flow in filteredFlows" :key="flow.id">
+            <a class="portal-card is-flow" :href="`/flow/${flow.id}`">
+              <div class="pc-head">
+                <span class="pc-name" x-text="flow.title"></span>
+                <span class="badge badge-teal">flow</span>
+              </div>
+              <p class="pc-desc" x-text="flow.description || flow.name"></p>
+              <div class="pc-tags">
+                <template x-for="t in (flow.triggers || []).slice(0, 6)" :key="t">
+                  <span class="chip" x-text="t"></span>
+                </template>
+              </div>
+            </a>
+          </template>
+        </div>
+        <div class="empty-inline" x-show="filteredFlows.length === 0" x-cloak style="max-width:1240px">没有匹配的流程</div>
+      </div>
+
+      <!-- 加载中 -->
+      <div class="empty-inline" x-show="loading" x-cloak style="max-width:980px">加载中…</div>
+    </div>
+  </div>
+
+  <script>
+    function portal() {
+      return {
+        data: { projects: [], skills: [], flows: [] },
+        search: '',
+        tab: 'skills',
+        darkMode: localStorage.getItem('anycli-editor-theme') === 'dark',
+        loading: true,
+
+        get totalApis() {
+          return (this.data.skills || []).reduce((sum, s) => sum + (s.apiCount || 0), 0);
+        },
+        get filteredSkills() {
+          const q = this.search.toLowerCase();
+          if (!q) return this.data.skills || [];
+          return (this.data.skills || []).filter(s =>
+            s.name.toLowerCase().includes(q) ||
+            (s.description || '').toLowerCase().includes(q) ||
+            (s.triggers || []).some(t => t.toLowerCase().includes(q))
+          );
+        },
+        get filteredFlows() {
+          const q = this.search.toLowerCase();
+          if (!q) return this.data.flows || [];
+          return (this.data.flows || []).filter(f =>
+            (f.title || '').toLowerCase().includes(q) ||
+            (f.name || '').toLowerCase().includes(q) ||
+            (f.triggers || []).some(t => t.toLowerCase().includes(q))
+          );
+        },
+
+        async init() {
+          document.addEventListener('keydown', (e) => {
+            if (e.key === '/' && document.activeElement !== this.$refs.searchInput) {
+              e.preventDefault();
+              this.$refs.searchInput?.focus();
+            }
+          });
+          this.$watch('darkMode', (v) => {
+            localStorage.setItem('anycli-editor-theme', v ? 'dark' : 'light');
+            document.documentElement.setAttribute('data-theme', v ? 'dark' : 'light');
+          });
+          try {
+            const resp = await fetch('/api/portal');
+            const json = await resp.json();
+            if (json.success) this.data = json.data;
+          } catch (err) {
+            console.error('Failed to load portal data:', err);
+          }
+          this.loading = false;
+        }
+      };
+    }
+  </script>
+</body>
+</html>

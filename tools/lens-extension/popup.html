@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>CLI-Anything-X Live Lens</title>
+  <style>
+    body {
+      width: 320px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      padding: 16px;
+      background: #f9fafb;
+      color: #111827;
+    }
+    h3 {
+      margin-top: 0;
+      margin-bottom: 12px;
+      font-size: 16px;
+      color: #111827;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      font-size: 12px;
+      border-radius: 9999px;
+      background: #e5e7eb;
+      color: #374151;
+    }
+    .status-badge.recording {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+    .field-group {
+      margin-bottom: 12px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: #4b5563;
+    }
+    input[type="text"], textarea {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    textarea {
+      height: 70px;
+      resize: vertical;
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-start {
+      background: #2563eb;
+      color: #ffffff;
+    }
+    .btn-start:hover {
+      background: #1d4ed8;
+    }
+    .btn-stop {
+      background: #dc2626;
+      color: #ffffff;
+    }
+    .btn-stop:hover {
+      background: #b91c1c;
+    }
+    .info-msg {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #6b7280;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <h3>
+    <span>🎥 CLI-Anything-X Live Lens 2.0</span>
+    <span id="statusBadge" class="status-badge">未开始</span>
+  </h3>
+
+  <div id="startForm">
+    <div class="field-group">
+      <label for="tokenInput">CLI 配对 Token (可选)</label>
+      <input type="text" id="tokenInput" placeholder="默认无需输入" />
+    </div>
+    <button id="btnStart" class="btn-start">● 开始录制</button>
+  </div>
+
+  <div id="stopForm" style="display: none;">
+    <div class="field-group">
+      <label for="intentInput">人工补充业务逻辑/条件意图 (P0 收集)</label>
+      <textarea id="intentInput" placeholder="例如：搜索指定客户，如果状态是未启用（disabled）就点击启用..."></textarea>
+    </div>
+    <button id="btnStop" class="btn-stop">■ 结束录制并提交</button>
+  </div>
+
+  <div id="msgBox" class="info-msg">准备就绪。在具体业务页面手动点击“开始录制”。</div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

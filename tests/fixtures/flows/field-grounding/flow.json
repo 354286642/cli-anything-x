@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "meta": { "name": "field-grounding-sample", "description": "合成样例流程（字段接地校验测试用）", "type": "flow", "triggers": ["样例"] },
+  "title": "样例流程",
+  "businessGoal": "用于字段接地校验测试的纯合成流程",
+  "scenarios": [],
+  "prerequisites": [],
+  "steps": [
+    {
+      "id": "step-1", "title": "填写明细", "level": 0, "parentId": null,
+      "conditional": false, "condition": null, "dependsOn": [],
+      "apiRefs": ["sample-order-create"], "fieldRefs": ["detailsList"], "content": "填写样品明细"
+    }
+  ],
+  "fieldGroups": [
+    { "name": "基础信息", "fields": [ { "name": "brandCode", "type": "string", "required": true, "condition": null } ] }
+  ],
+  "apis": [],
+  "speechTemplates": [],
+  "agentStrategy": { "prefillRules": [], "mustAsk": [], "forbidden": [] },
+  "endApi": { "method": "POST", "path": "/api/legacy/unknown-endpoint", "bodyTemplate": "{}" },
+  "errorHandling": [],
+  "successCriteria": [],
+  "domainKnowledge": [],
+  "reference": { "fields": "", "examples": "", "verify": "" }
+}
