@@ -1,6 +1,7 @@
 import { getSessionId, setSessionId, setProfileField } from '../config.js';
 import type { AuthStrategy, AuthContext, AuthStatus } from './types.js';
 import { AnycliError, ErrorCode } from '../errors.js';
+import { warnIfInsecureHttp } from '../security.js';
 
 /**
  * session-id 鉴权策略。
@@ -28,6 +29,7 @@ export const sessionIdStrategy: AuthStrategy = {
   async refresh(ctx): Promise<boolean> {
     const { auth } = ctx;
     if (!auth.refreshUrl) return false;
+    warnIfInsecureHttp(auth.refreshUrl, '刷新接口与会话凭证可能被明文传输');
     const sessionId = getSessionId();
     if (!sessionId) return false;
 

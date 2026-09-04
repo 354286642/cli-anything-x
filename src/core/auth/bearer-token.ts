@@ -2,6 +2,7 @@ import inquirer from 'inquirer';
 import { getProfileToken, setProfileToken, setProfileAuthField, setProfileField } from '../config.js';
 import type { AuthStrategy, AuthContext, AuthStatus } from './types.js';
 import { AnycliError, ErrorCode } from '../errors.js';
+import { warnIfInsecureHttp } from '../security.js';
 
 /**
  * bearer-token 鉴权策略。
@@ -44,6 +45,7 @@ export const bearerTokenStrategy: AuthStrategy = {
   async refresh(ctx): Promise<boolean> {
     const { auth } = ctx;
     if (!auth.refreshUrl) return false;
+    warnIfInsecureHttp(auth.refreshUrl, '刷新接口与 token 可能被明文传输');
     const token = auth.token || '';
     if (!token) return false;
 

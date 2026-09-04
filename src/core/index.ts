@@ -4,6 +4,7 @@ export {
   getProjectConfig, setProjectConfig, getProjectAuthConfig,
   getProfileAuthConfig, setProfileAuthField, setProfileAuthType,
   getProfileToken, setProfileToken,
+  getCredentialStore, setCredentialStore, getWarnInsecureHttp, setWarnInsecureHttp, isKeychainAvailable,
   getEnv, getDefaultFormat, getGatewayUrl, getLoginUrl,
   getAllProjects, projectExists,
   ENV_LABELS, CONFIG_DIR,
@@ -13,13 +14,15 @@ export {
   getActiveProfileName, setActiveProfile, profileExists,
   setProfileOverride, getProfileOverride,
 } from './config.js';
-export type { ProjectConfig, AnycliConfig, ProfileData, ProjectAuthConfig, ProfileAuthConfig, AuthStrategyType } from './config.js';
+export type { ProjectConfig, AnycliConfig, ProfileData, ProjectAuthConfig, ProfileAuthConfig, AuthStrategyType, CredentialStore } from './config.js';
 export { requireSession, requireProject, refreshCredential, getStrategy } from './auth.js';
 export type { AuthStrategy, AuthContext } from './auth.js';
 export { createClient } from './client.js';
 export type { AnycliClient, RequestOptions, ApiResponse } from './client.js';
 export { output, outputError, success, info, warn } from './output.js';
 export type { OutputFormat } from './output.js';
+export { warnIfInsecureHttp, shouldWarnInsecureHttp } from './security.js';
+export { keychainAvailable, keychainGet, keychainSet, keychainDelete } from './secret-store.js';
 export { AnycliError, ErrorCode, ExitCode } from './errors.js';
 export {
   FLOW_ENHANCE_SCHEMA, normalizeFlowForEnhance, analyzeFlowEnd,

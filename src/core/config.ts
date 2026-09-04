@@ -2,6 +2,8 @@ import Conf from 'conf';
 import { mkdirSync } from 'fs';
 import { extractSessionId } from './session.js';
 import { AnycliError, ErrorCode } from './errors.js';
+import { keychainGet, keychainSet, keychainDelete, keychainAvailable } from './secret-store.js';
+import { warn } from './output.js';
 import { homedir } from 'os';
 import { join, resolve } from 'path';
 import { dirname } from 'path';
@@ -26,7 +28,12 @@ export interface ProfileAuthConfig {
   token?: string;
   refreshUrl?: string;
   refreshIntervalMs?: number;
+  /** 刷新接口需要的静态请求头（如租户头），可选 */
   extraHeaders?: Record<string, string>;
+  /** 凭证存储方式：file（config.json，默认）| keychain（系统钥匙串） */
+  credentialStore?: 'file' | 'keychain';
+  /** 传输安全：http 明文 URL 是否提示风险，默认 true（提示）；false 关闭提示 */
+  warnInsecureHttp?: boolean;
 }
 
 /** 一次请求解析出的有效鉴权配置：授权方式/凭证/刷新来自 Profile，静态请求头来自项目（如 x-tenant-id） */
@@ -237,11 +244,30 @@ export function setConfig(key: string, value: unknown): void {
 
 export function getSessionId(): string {
   if (process.env.ANYCLI_SESSION_ID) return extractSessionId(process.env.ANYCLI_SESSION_ID);
+  if (getCredentialStore() === 'keychain') {
+    const v = keychainGet(KEYCHAIN_SERVICE, keychainAccount('session-id'));
+    if (v) return v;
+  }
   return getProfile().sessionId || '';
 }
 
 export function setSessionId(sessionId: string): void {
-  setProfileField('sessionId', extractSessionId(sessionId));
+  const v = extractSessionId(sessionId);
+  if (getCredentialStore() === 'keychain') {
+    if (v) {
+      if (!keychainSet(KEYCHAIN_SERVICE, keychainAccount('session-id'), v)) {
+        warn('系统钥匙串写入失败，凭证将降级保存在本地配置文件');
+        setProfileField('sessionId', v);
+      } else {
+        setProfileField('sessionId', '');
+      }
+    } else {
+      keychainDelete(KEYCHAIN_SERVICE, keychainAccount('session-id'));
+      setProfileField('sessionId', '');
+    }
+  } else {
+    setProfileField('sessionId', v);
+  }
 }
 
 export function getProjectConfig(projectName: string): ProjectConfig | undefined {
@@ -269,7 +295,7 @@ export function getProfileAuthConfig(): ProjectAuthConfig {
   const profileAuth = profile.auth || { type: 'session-id' as AuthStrategyType };
   return {
     type: profileAuth.type,
-    token: profileAuth.token,
+    token: getProfileToken(),
     refreshUrl: profileAuth.refreshUrl,
     refreshIntervalMs: profileAuth.refreshIntervalMs,
     extraHeaders: profileAuth.extraHeaders || {},
@@ -291,12 +317,68 @@ export function setProfileAuthType(type: AuthStrategyType): void {
 
 /** 获取当前 Profile 的 bearer-token 凭证 */
 export function getProfileToken(): string {
+  if (getCredentialStore() === 'keychain') {
+    const v = keychainGet(KEYCHAIN_SERVICE, keychainAccount('token'));
+    if (v) return v;
+  }
   return getProfile().auth?.token || '';
 }
 
 /** 设置当前 Profile 的 bearer-token 凭证 */
 export function setProfileToken(token: string): void {
-  setProfileAuthField('token', token);
+  if (getCredentialStore() === 'keychain') {
+    if (token) {
+      if (!keychainSet(KEYCHAIN_SERVICE, keychainAccount('token'), token)) {
+        warn('系统钥匙串写入失败，凭证将降级保存在本地配置文件');
+        setProfileAuthField('token', token);
+      } else {
+        setProfileAuthField('token', '');
+      }
+    } else {
+      keychainDelete(KEYCHAIN_SERVICE, keychainAccount('token'));
+      setProfileAuthField('token', '');
+    }
+  } else {
+    setProfileAuthField('token', token);
+  }
+}
+
+/** 凭证存储方式：file（config.json，默认）| keychain（系统钥匙串） */
+export type CredentialStore = 'file' | 'keychain';
+
+const KEYCHAIN_SERVICE = 'anycli';
+
+/** 当前 Profile 的凭证存储方式（默认 file，兼容历史配置） */
+export function getCredentialStore(): CredentialStore {
+  return getProfile().auth?.credentialStore === 'keychain' ? 'keychain' : 'file';
+}
+
+/** 设置凭证存储方式（file | keychain） */
+export function setCredentialStore(store: CredentialStore): void {
+  if (store !== 'file' && store !== 'keychain') {
+    throw new AnycliError(ErrorCode.INVALID_PARAMS, `credentialStore 仅支持: file, keychain（收到: ${store}）`);
+  }
+  setProfileAuthField('credentialStore', store);
+}
+
+/** 当前 Profile 是否提示 http 明文传输风险（默认 true，提示） */
+export function getWarnInsecureHttp(): boolean {
+  return getProfile().auth?.warnInsecureHttp !== false;
+}
+
+/** 设置 http 明文传输风险提示开关（true 提示 / false 关闭） */
+export function setWarnInsecureHttp(flag: boolean): void {
+  setProfileAuthField('warnInsecureHttp', !!flag);
+}
+
+/** 系统钥匙串是否可用（UI 展示 / 提示用） */
+export function isKeychainAvailable(): boolean {
+  return keychainAvailable();
+}
+
+/** 系统钥匙串 account 键（按工作目录 + Profile + 凭证类型隔离，避免多项目/多环境串凭证） */
+function keychainAccount(kind: 'session-id' | 'token'): string {
+  return `${resolveWorkspace()}|${resolveProfileName()}|${kind}`;
 }
 
 /**
@@ -309,7 +391,7 @@ export function resolveAuthFromProjectConfig(config?: ProjectConfig): ProjectAut
   const profileAuth = getProfile().auth || { type: 'session-id' as AuthStrategyType };
   return {
     type: profileAuth.type,
-    token: profileAuth.token,
+    token: getProfileToken(),
     refreshUrl: profileAuth.refreshUrl,
     refreshIntervalMs: profileAuth.refreshIntervalMs,
     extraHeaders: resolveProjectHeaders(config),

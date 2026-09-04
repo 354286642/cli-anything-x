@@ -1,6 +1,7 @@
 import { getStrategy, requireProject } from './auth.js';
 import { AnycliError, ErrorCode } from './errors.js';
 import { getGatewayUrl, getProjectAuthConfig, getProfile } from './config.js';
+import { warnIfInsecureHttp } from './security.js';
 
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -46,6 +47,7 @@ export function createClient(projectName: string) {
   const ctx = { project: projectName, auth, profile };
 
   const baseUrl = projectConfig.baseUrl || getGatewayUrl();
+  warnIfInsecureHttp(baseUrl, '业务请求与凭证可能被明文传输');
 
   async function doRequest<T = unknown>(options: RequestOptions, headers: Record<string, string>): Promise<T> {
     const { method = 'GET', path, query, body, timeout = 30000 } = options;

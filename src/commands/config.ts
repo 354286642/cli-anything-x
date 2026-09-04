@@ -13,6 +13,8 @@ import {
   getActiveProfileName, setActiveProfile, profileExists,
   setProfileField,
   getProfileAuthConfig, setProfileAuthType, setProfileAuthField, getProfileToken,
+  getCredentialStore, setCredentialStore, getWarnInsecureHttp, setWarnInsecureHttp,
+  isKeychainAvailable,
 } from '../core/index.js';
 import type { ProfileData } from '../core/index.js';
 import { output, success, info, warn } from '../core/output.js';
@@ -284,6 +286,9 @@ export function registerConfigCommands(program: Command): void {
         authType: authCfg.type,
         refreshUrl: authCfg.refreshUrl || null,
         refreshIntervalMs: authCfg.refreshIntervalMs || null,
+        credentialStore: getCredentialStore(),
+        warnInsecureHttp: getWarnInsecureHttp(),
+        keychainAvailable: isKeychainAvailable(),
         credential: credential ? `${credential.slice(0, 8)}...` : '(未登录)',
         projects: profile.projects,
       });
@@ -314,6 +319,21 @@ export function registerConfigCommands(program: Command): void {
           return;
         }
         setProfileAuthField('refreshIntervalMs', ms);
+      } else if (key === 'auth.credential-store' || key === 'authCredentialStore') {
+        if (value !== 'file' && value !== 'keychain') {
+          warn('auth.credential-store 仅支持: file, keychain');
+          return;
+        }
+        setCredentialStore(value);
+        if (value === 'keychain' && !isKeychainAvailable()) {
+          warn('系统钥匙串不可用，将自动降级为 file 存储（凭证仍存于配置文件）');
+        }
+      } else if (key === 'auth.warn-insecure-http' || key === 'authWarnInsecureHttp') {
+        if (value !== 'true' && value !== 'false') {
+          warn('auth.warn-insecure-http 仅支持: true, false');
+          return;
+        }
+        setWarnInsecureHttp(value === 'true');
       } else if (key === 'defaultFormat') {
         setConfig('defaultFormat', value);
       } else {
@@ -328,6 +348,10 @@ export function registerConfigCommands(program: Command): void {
     .action((key: string) => {
       if (key === 'auth-type') {
         output({ 'auth-type': getProfileAuthConfig().type });
+      } else if (key === 'auth.credential-store') {
+        output({ 'auth.credential-store': getCredentialStore() });
+      } else if (key === 'auth.warn-insecure-http') {
+        output({ 'auth.warn-insecure-http': getWarnInsecureHttp() });
       } else if (key === 'env' || key === 'sessionId' || key === 'projects') {
         const profile = getProfile();
         output({ [key]: (profile as unknown as Record<string, unknown>)[key] ?? null });

@@ -8,6 +8,7 @@ import {
   getProfileToken, setProfileToken, setProfileAuthField, getLoginUrl,
 } from '../core/index.js';
 import { success, info, output, warn } from '../core/output.js';
+import { warnIfInsecureHttp } from '../core/security.js';
 import { AnycliError, ErrorCode } from '../core/errors.js';
 import { execSync } from 'child_process';
 import path from 'path';
@@ -342,6 +343,7 @@ export function registerAuthCommands(program: Command): void {
 
       const env = getEnv();
       const loginUrl = getLoginUrl();
+      warnIfInsecureHttp(loginUrl, '登录页与会话凭证可能被明文传输');
       info(`Profile: ${profileName} | 环境: ${ENV_LABELS[env] || env} (${env}) | 授权方式: ${authType}`);
 
       // 2. 直接传入凭证（脚本/CI）

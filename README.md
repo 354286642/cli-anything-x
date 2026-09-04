@@ -93,7 +93,9 @@ anycli config set workspace /path/to/workspace   # 或 export ANYCLI_WORKSPACE=/
         "refreshIntervalMs": 28800000,               # 刷新间隔（毫秒，8 小时 = 28800000）
         "extraHeaders": {                            # 可选：仅【刷新接口】用的静态请求头（如租户头）
           "x-tenant-id": "demo-service"
-        }
+        },
+        "credentialStore": "file",                   # 凭证存储：file（config.json，默认）| keychain（系统钥匙串）
+        "warnInsecureHttp": true                     # 传输安全：http 明文 URL 是否提示风险（默认 true，false 关闭提示）
       },
       "projects": {                                  # 业务系统接入
         "demo": {
@@ -124,6 +126,19 @@ anycli config set workspace /path/to/workspace   # 或 export ANYCLI_WORKSPACE=/
 - 整个 CLI 只保留一套授权（session-id / bearer-token），跟随当前 Profile 环境，不按项目细分。
 - 用 `anycli auth login` 选择授权方式并写入凭证（`sessionId` / `auth.token`）；也可 `anycli config set auth-type session-id|bearer-token` 切换。
 - 凭证自动刷新：`auth.refreshUrl`（必须完整 URL，含协议与域名）与间隔 `auth.refreshIntervalMs` 由用户自填；刷新接口返回体约定 `{ success, data: { sessionId | token } }`。刷新成功后 `sessionUpdatedAt` 会自动写入最近刷新时间戳。
+
+**凭证存储（credentialStore）**
+
+- `file`（默认）：凭证明文存于本地 `config.json`，配置简单、跨机器可移植；`.gitignore` 已排除，适合个人使用。
+- `keychain`：凭证存入**系统钥匙串**（Windows Credential Manager / macOS Keychain / Linux libsecret），`config.json` 不再落明文；依赖 `@napi-rs/keyring`（可选依赖，安装失败自动降级回 `file` 并提示）。切换：`anycli config set auth.credential-store keychain`（或 `file`）。
+  - 钥匙串条目按「工作目录 + Profile + 凭证类型」隔离（service=`anycli`），多项目/多环境互不串用。
+  - 注意：`keychain` 下凭证不在 `config.json` 中，备份/迁移环境需重新 `anycli auth login`。
+- `keychain` 写入失败时自动降级为 `file` 并给出警告，凭证不会丢失。
+
+**传输安全（warnInsecureHttp）**
+
+- 默认 `true`：当 `gatewayUrl` / `loginUrl` / `refreshUrl` / 业务请求基址为 `http://` 明文时，CLI 会输出一次风险提示，提醒生产环境应使用 https。
+- 仅内网开发环境确需 http 时，可关闭提示：`anycli config set auth.warn-insecure-http false`。
 
 **请求头（两个 extraHeaders 的区分）**
 

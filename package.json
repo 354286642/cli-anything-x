@@ -35,19 +35,22 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "commander": "^12.1.0",
     "chalk": "^5.3.0",
-    "ora": "^8.0.1",
-    "inquirer": "^9.2.12",
+    "cli-table3": "^0.6.5",
+    "commander": "^12.1.0",
     "conf": "^12.0.0",
+    "inquirer": "^9.2.12",
     "open": "^10.1.0",
-    "cli-table3": "^0.6.5"
+    "ora": "^8.0.1"
   },
   "devDependencies": {
-    "typescript": "^5.5.0",
-    "tsx": "^4.16.0",
-    "@types/node": "^20.14.0",
     "@types/inquirer": "^9.0.7",
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0",
     "vitest": "^3.2.1"
+  },
+  "optionalDependencies": {
+    "@napi-rs/keyring": "^2.0.0"
   }
 }
