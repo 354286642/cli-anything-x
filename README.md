@@ -129,6 +129,7 @@ anycli config set workspace /path/to/workspace   # 或 export ANYCLI_WORKSPACE=/
 
 **凭证存储（credentialStore）**
 
+- 新建 Profile 时，`config.json` 会默认写入 `credentialStore: "file"` 与 `warnInsecureHttp: true`，可直接改文件或用 `config set` 调整。
 - `file`（默认）：凭证明文存于本地 `config.json`，配置简单、跨机器可移植；`.gitignore` 已排除，适合个人使用。
 - `keychain`：凭证存入**系统钥匙串**（Windows Credential Manager / macOS Keychain / Linux libsecret），`config.json` 不再落明文；依赖 `@napi-rs/keyring`（可选依赖，安装失败自动降级回 `file` 并提示）。切换：`anycli config set auth.credential-store keychain`（或 `file`）。
   - 钥匙串条目按「工作目录 + Profile + 凭证类型」隔离（service=`anycli`），多项目/多环境互不串用。

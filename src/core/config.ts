@@ -195,7 +195,17 @@ export function createProfile(name: string, env: ProfileData['env'] = 'prod'): P
   if (profiles[name]) {
     return profiles[name];
   }
-  const profile: ProfileData = { env, sessionId: '', projects: {} };
+  const profile: ProfileData = {
+    env,
+    sessionId: '',
+    projects: {},
+    // 显式写入安全相关默认值，让使用者在 config.json 中即可看到并按需修改
+    auth: {
+      type: 'session-id',
+      credentialStore: 'file', // file（config.json）| keychain（系统钥匙串）
+      warnInsecureHttp: true, // http 明文 URL 是否提示风险（false 关闭）
+    },
+  };
   profiles[name] = profile;
   store.set('profiles', profiles);
   return profile;
