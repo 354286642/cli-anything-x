@@ -8,17 +8,25 @@
  */
 import http from 'node:http';
 import { readFile, writeFile, mkdir, readdir, stat } from 'node:fs/promises';
-import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync, unlinkSync, appendFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync, unlinkSync, appendFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execSync, spawn, spawnSync } from 'node:child_process';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { createFlowEnhanceManager } from '../flow-editor/flow-enhance-server.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
-const APIS_DIR = path.join(ROOT, 'apis');
-const SKILLS_DIR = path.join(ROOT, 'skills');
+const coreConfig = await import(pathToFileURL(path.join(ROOT, 'dist', 'core', 'config.js')).href);
+const javaParser = await import(pathToFileURL(path.join(ROOT, 'dist', 'core', 'java-parser.js')).href);
+const skillBuilder = await import(pathToFileURL(path.join(ROOT, 'dist', 'core', 'skill-builder.js')).href);
+const genPipeline = await import(pathToFileURL(path.join(ROOT, 'dist', 'core', 'gen-pipeline.js')).href);
+const routing = await import(pathToFileURL(path.join(ROOT, 'dist', 'core', 'routing.js')).href);
+const skillDocs = await import(pathToFileURL(path.join(ROOT, 'dist', 'core', 'skill-docs.js')).href);
+const WORKSPACE = coreConfig.resolveWorkspace();
+const APIS_DIR = path.join(WORKSPACE, 'apis');
+const SKILLS_DIR = path.join(WORKSPACE, 'skills');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 // 完整版流程可视化编辑器（anycli flow edit 使用的版本）
 const FLOW_EDITOR_DIR = path.join(ROOT, 'tools', 'flow-editor');
@@ -33,6 +41,133 @@ function parsePort(argv) {
   return 3200;
 }
 const PORT = parsePort(process.argv.slice(2));
+let selectedProfileName = coreConfig.resolveProfileName();
+const WORKBENCH_AUTH_PORT = 19876;
+let workbenchAuth = { status: 'idle', profileName: '', error: '' };
+let authCallbackServer = null;
+let authTimeout = null;
+
+function useProfile(name) {
+  if (!coreConfig.profileExists(name)) throw new Error(`Profile 不存在：${name}`);
+  selectedProfileName = name;
+  coreConfig.setActiveProfile(name);
+  process.env.ANYCLI_PROFILE = name;
+  delete process.env.ANYCLI_ENV;
+}
+
+function safeProfile(name) {
+  const profile = coreConfig.getProfile(name);
+  const auth = profile.auth || { type: 'session-id' };
+  const previousOverride = coreConfig.getProfileOverride();
+  coreConfig.setProfileOverride(name);
+  let credentialConfigured = false;
+  try {
+    credentialConfigured = Boolean(auth.type === 'bearer-token' ? coreConfig.getProfileToken() : coreConfig.getSessionId());
+  } catch { /* 状态页仅展示配置状态 */ }
+  finally { coreConfig.setProfileOverride(previousOverride); }
+  const projectConfigs = profile.projects || {};
+  return {
+    name,
+    env: profile.env || 'prod',
+    gatewayUrl: profile.gatewayUrl || '',
+    loginUrl: profile.loginUrl || '',
+    authType: auth.type || 'session-id',
+    credentialConfigured,
+    credentialStore: auth.credentialStore || 'file',
+    refreshUrl: auth.refreshUrl || '',
+    refreshIntervalMs: auth.refreshIntervalMs || null,
+    projects: Object.fromEntries(Object.entries(projectConfigs).map(([project, cfg]) => [project, {
+      prefix: cfg.prefix || '', baseUrl: cfg.baseUrl || '',
+      pathVariables: cfg.pathVariables || {}, extraHeaders: coreConfig.resolveProjectHeaders(cfg),
+    }])),
+  };
+}
+
+function safeName(value, label) {
+  const name = String(value || '').trim();
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name)) throw new Error(`${label}只能包含字母、数字、下划线和连字符，且不能以符号开头`);
+  return name;
+}
+
+function finishWorkbenchAuth(status, error = '') {
+  if (authTimeout) clearTimeout(authTimeout);
+  authTimeout = null;
+  workbenchAuth = { ...workbenchAuth, status, error };
+  if (authCallbackServer) {
+    const current = authCallbackServer;
+    authCallbackServer = null;
+    current.close();
+  }
+}
+
+async function startWorkbenchAuth() {
+  if (workbenchAuth.status === 'pending') throw new Error('已有授权登录正在等待完成');
+  const profileName = selectedProfileName;
+  const profile = coreConfig.getProfile(profileName);
+  const authType = profile.auth?.type === 'bearer-token' ? 'bearer-token' : 'session-id';
+  const loginUrl = String(profile.loginUrl || process.env.ANYCLI_LOGIN_URL || '').trim();
+  if (!loginUrl) throw new Error('当前 Profile 尚未配置登录页地址');
+  let parsedLoginUrl;
+  try { parsedLoginUrl = new URL(loginUrl); }
+  catch { throw new Error('登录页地址格式不正确'); }
+  if (!['http:', 'https:'].includes(parsedLoginUrl.protocol)) throw new Error('登录页地址必须使用 HTTP 或 HTTPS');
+
+  const state = randomBytes(24).toString('hex');
+  const callbackUrl = `http://localhost:${WORKBENCH_AUTH_PORT}/callback?state=${state}`;
+  const server = http.createServer((req, res) => {
+    const callback = new URL(req.url || '/', `http://localhost:${WORKBENCH_AUTH_PORT}`);
+    if (callback.pathname !== '/callback') {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('Not Found');
+    }
+    const returnedState = Buffer.from(callback.searchParams.get('state') || '');
+    const expectedState = Buffer.from(state);
+    const stateMatches = returnedState.length === expectedState.length && timingSafeEqual(returnedState, expectedState);
+    if (!stateMatches) {
+      finishWorkbenchAuth('failed', '授权回调状态校验失败');
+      res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end('<!doctype html><meta charset="utf-8"><title>授权失败</title><h2>授权校验失败</h2><p>请回到工作台重新发起登录。</p>');
+    }
+
+    const credential = callback.searchParams.get(authType === 'bearer-token' ? 'token' : 'sessionId');
+    if (!credential) {
+      finishWorkbenchAuth('failed', `回调中没有 ${authType === 'bearer-token' ? 'token' : 'sessionId'}`);
+      res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end('<!doctype html><meta charset="utf-8"><title>授权失败</title><h2>没有收到凭证</h2><p>请回到工作台重新发起登录。</p>');
+    }
+
+    const previousOverride = coreConfig.getProfileOverride();
+    try {
+      coreConfig.setProfileOverride(profileName);
+      if (authType === 'bearer-token') coreConfig.setProfileToken(credential.trim());
+      else coreConfig.setSessionId(credential.trim());
+      workbenchAuth = { status: 'complete', profileName, error: '' };
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end('<!doctype html><meta charset="utf-8"><title>授权完成</title><h2>授权成功</h2><p>凭证已保存到当前环境，可以关闭此页面并返回工作台。</p>');
+      finishWorkbenchAuth('complete');
+    } catch (err) {
+      finishWorkbenchAuth('failed', err.message || '凭证保存失败');
+      res.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end('<!doctype html><meta charset="utf-8"><title>授权失败</title><h2>凭证保存失败</h2><p>请返回工作台查看错误信息。</p>');
+    } finally {
+      coreConfig.setProfileOverride(previousOverride);
+    }
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(WORKBENCH_AUTH_PORT, '127.0.0.1', resolve);
+  }).catch(err => {
+    if (err.code === 'EADDRINUSE') throw new Error(`授权回调端口 ${WORKBENCH_AUTH_PORT} 已被占用，请关闭其他登录流程后重试`);
+    throw err;
+  });
+
+  authCallbackServer = server;
+  workbenchAuth = { status: 'pending', profileName, error: '' };
+  authTimeout = setTimeout(() => finishWorkbenchAuth('failed', '授权超时，请重新发起登录'), 120000);
+  const authUrl = `${loginUrl.replace(/\/+$/, '')}/cli-auth?callback=${encodeURIComponent(callbackUrl)}`;
+  return { authUrl, profileName, authType };
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -50,7 +185,7 @@ const MIME = {
 // ── 工具函数 ──
 function sendJson(res, code, payload) {
   const body = JSON.stringify(payload);
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(body);
 }
 
@@ -123,7 +258,7 @@ function listModules(project) {
   const dir = path.join(APIS_DIR, project);
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
-    .filter(f => f.endsWith('.json') && f !== 'schema.json')
+    .filter(f => f.endsWith('.json') && f !== 'schema.json' && f !== 'gen.json')
     .map(f => f.replace('.json', ''));
 }
 
@@ -366,7 +501,6 @@ async function handleEnrich(req, res, project, module) {
     'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
   });
   const sendEvent = (event, data) => {
     if (!res.writableEnded) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -472,12 +606,224 @@ async function handleApi(req, res, url) {
 
   // CORS preflight
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    });
+    res.writeHead(204);
     return res.end();
+  }
+
+  if (pathname === '/api/auth/login' && req.method === 'POST') {
+    try {
+      const result = await startWorkbenchAuth();
+      return sendJson(res, 200, { success: true, data: result });
+    } catch (err) { return sendError(res, 400, err.message); }
+  }
+
+  if (pathname === '/api/auth/login/status' && req.method === 'GET') {
+    return sendJson(res, 200, {
+      success: true,
+      data: { status: workbenchAuth.status, profileName: workbenchAuth.profileName, error: workbenchAuth.error },
+    });
+  }
+
+  if (pathname === '/api/workbench' && req.method === 'GET') {
+    const profiles = coreConfig.listProfiles();
+    const profileNames = Object.keys(profiles);
+    if (!profileNames.includes(selectedProfileName)) selectedProfileName = coreConfig.getActiveProfileName();
+    return sendJson(res, 200, {
+      success: true,
+      data: {
+        workspace: WORKSPACE,
+        activeProfile: selectedProfileName,
+        profiles: profileNames.map(name => safeProfile(name)),
+        current: safeProfile(selectedProfileName),
+        credentialStoreAvailable: coreConfig.isKeychainAvailable(),
+      },
+    });
+  }
+
+  if (pathname === '/api/profiles/use' && req.method === 'POST') {
+    try {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      useProfile(String(body.name || ''));
+      return sendJson(res, 200, { success: true, data: { activeProfile: selectedProfileName, current: safeProfile(selectedProfileName) } });
+    } catch (err) { return sendError(res, 400, err.message); }
+  }
+
+  if (pathname === '/api/profiles' && req.method === 'POST') {
+    try {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const name = safeName(body.name, 'Profile 名称');
+      if (coreConfig.profileExists(name)) return sendError(res, 409, `Profile 已存在：${name}`);
+      const env = ['test', 'prod', 'dev'].includes(body.env) ? body.env : 'prod';
+      coreConfig.createProfile(name, env);
+      if (body.gatewayUrl) coreConfig.setProfileField('gatewayUrl', String(body.gatewayUrl).trim(), name);
+      if (body.loginUrl) coreConfig.setProfileField('loginUrl', String(body.loginUrl).trim(), name);
+      return sendJson(res, 201, { success: true, data: safeProfile(name) });
+    } catch (err) { return sendError(res, 400, err.message); }
+  }
+
+  const profileMatch = pathname.match(/^\/api\/profiles\/([^/]+)$/);
+  if (profileMatch && req.method === 'PUT') {
+    try {
+      const name = decodeURIComponent(profileMatch[1]);
+      if (!coreConfig.profileExists(name)) return sendError(res, 404, `Profile 不存在：${name}`);
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const profile = coreConfig.getProfile(name);
+      if (body.env !== undefined) {
+        if (!['test', 'prod', 'dev'].includes(body.env)) return sendError(res, 400, '环境只支持 test、prod、dev');
+        coreConfig.setProfileField('env', body.env, name);
+      }
+      for (const field of ['gatewayUrl', 'loginUrl']) {
+        if (body[field] !== undefined) coreConfig.setProfileField(field, String(body[field]).trim(), name);
+      }
+      if (body.authType !== undefined) {
+        if (!['session-id', 'bearer-token'].includes(body.authType)) return sendError(res, 400, '授权方式只支持 session-id、bearer-token');
+        coreConfig.setProfileField('auth', { ...(profile.auth || {}), type: body.authType }, name);
+      }
+      if (name === selectedProfileName) useProfile(name);
+      return sendJson(res, 200, { success: true, data: safeProfile(name) });
+    } catch (err) { return sendError(res, 400, err.message); }
+  }
+
+  if (pathname === '/api/projects' && req.method === 'POST') {
+    try {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const name = safeName(body.name, '项目名称');
+      if (coreConfig.projectExists(name)) return sendError(res, 409, `当前 Profile 已有项目：${name}`);
+      const extraHeaders = body.extraHeaders || {};
+      if (typeof extraHeaders !== 'object' || Array.isArray(extraHeaders)) return sendError(res, 400, '额外请求头必须是 JSON 对象');
+      for (const [key, value] of Object.entries(extraHeaders)) {
+        if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(key) || typeof value !== 'string' || /[\r\n]/.test(value)) {
+          return sendError(res, 400, '请求头名称或值不合法');
+        }
+      }
+      const projectConfig = {
+        prefix: String(body.prefix || '').trim(),
+        ...(String(body.baseUrl || '').trim() ? { baseUrl: String(body.baseUrl).trim() } : {}),
+        ...(Object.keys(extraHeaders).length ? { auth: { extraHeaders } } : {}),
+      };
+      coreConfig.setProjectConfig(name, projectConfig);
+      mkdirSync(path.join(APIS_DIR, name), { recursive: true });
+      return sendJson(res, 201, { success: true, data: { name, ...projectConfig } });
+    } catch (err) { return sendError(res, 400, err.message); }
+  }
+
+  const projectMatch = pathname.match(/^\/api\/projects\/([^/]+)$/);
+  if (projectMatch && req.method === 'PUT') {
+    try {
+      const name = safeName(decodeURIComponent(projectMatch[1]), '项目名称');
+      if (!coreConfig.projectExists(name)) return sendError(res, 404, `当前 Profile 未配置项目：${name}`);
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const extraHeaders = body.extraHeaders || {};
+      if (typeof extraHeaders !== 'object' || Array.isArray(extraHeaders)) return sendError(res, 400, '额外请求头必须是 JSON 对象');
+      for (const [key, value] of Object.entries(extraHeaders)) {
+        if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(key) || typeof value !== 'string' || /[\r\n]/.test(value)) {
+          return sendError(res, 400, '请求头名称或值不合法');
+        }
+      }
+      const current = coreConfig.getProjectConfig(name);
+      const next = { ...current, prefix: String(body.prefix || '').trim() };
+      if (body.extraHeaders !== undefined) {
+        delete next.tenantId;
+        delete next.extTenantId;
+      }
+      const baseUrl = String(body.baseUrl || '').trim();
+      if (baseUrl) next.baseUrl = baseUrl;
+      else delete next.baseUrl;
+      const auth = { ...(current?.auth || {}) };
+      if (Object.keys(extraHeaders).length) auth.extraHeaders = extraHeaders;
+      else delete auth.extraHeaders;
+      if (Object.keys(auth).length) next.auth = auth;
+      else delete next.auth;
+      coreConfig.setProjectConfig(name, next);
+      return sendJson(res, 200, { success: true, data: { name, ...next } });
+    } catch (err) { return sendError(res, 400, err.message); }
+  }
+
+  const projectModulesMatch = pathname.match(/^\/api\/projects\/([^/]+)\/modules$/);
+  if (projectModulesMatch && req.method === 'GET') {
+    try {
+      const project = safeName(decodeURIComponent(projectModulesMatch[1]), '项目名称');
+      const modules = listModules(project).map(module => {
+        const registry = loadRegistry(project, module);
+        return { name: module, description: registry?.description || '', apiCount: registry?.apis?.length || 0 };
+      }).filter(module => module.name !== '_shared');
+      return sendJson(res, 200, { success: true, data: modules });
+    } catch (err) { return sendError(res, 400, err.message); }
+  }
+
+  if (pathname === '/api/ingest/scan' && req.method === 'POST') {
+    try {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const project = safeName(body.project, '项目名称');
+      const moduleName = safeName(body.module, '模块名称');
+      const rawSourcePath = String(body.sourcePath || '').trim();
+      if (!rawSourcePath) return sendError(res, 400, '请输入 Java 源码目录或文件路径');
+      const sourcePath = path.resolve(rawSourcePath);
+      if (!existsSync(sourcePath)) return sendError(res, 400, '源码路径不存在');
+      const wrappers = loadGenConfig(project)?.wrappers;
+      const scan = genPipeline.collectEndpoints(sourcePath, wrappers);
+      const endpoints = scan.endpoints;
+      if (!endpoints.length) return sendError(res, 404, '没有解析到接口，请确认目录包含 Java Controller 源码');
+      const existing = loadRegistry(project, moduleName)?.apis || [];
+      const fingerprint = createHash('sha256').update(JSON.stringify(endpoints)).digest('hex');
+      return sendJson(res, 200, {
+        success: true,
+        data: {
+          project, module: moduleName, controllerCount: scan.controllerCount,
+          fingerprint,
+          endpoints: endpoints.map((endpoint, index) => ({
+            index, method: endpoint.httpMethod, path: endpoint.path,
+            summary: endpoint.description || endpoint.methodName,
+            controller: endpoint.controllerName, sourceFile: endpoint.sourceFile,
+            queryParams: endpoint.queryParams || [], bodyFields: endpoint.bodyFields || [],
+            bodyTemplate: endpoint.bodyJsonExample || '', outputFields: endpoint.outputFields || '',
+            existing: existing.some(api => api.method === endpoint.httpMethod && api.path === endpoint.path),
+          })),
+        },
+      });
+    } catch (err) { return sendError(res, 400, err.message); }
+  }
+
+  if (pathname === '/api/ingest/commit' && req.method === 'POST') {
+    try {
+      const body = JSON.parse((await readBody(req)) || '{}');
+      const project = safeName(body.project, '项目名称');
+      const moduleName = safeName(body.module, '模块名称');
+      const selected = [...new Set((body.selected || []).map(Number))].filter(Number.isInteger);
+      if (!selected.length) return sendError(res, 400, '至少选择一个接口');
+      const rawSourcePath = String(body.sourcePath || '').trim();
+      if (!rawSourcePath) return sendError(res, 400, '请重新扫描接口');
+      const sourcePath = path.resolve(rawSourcePath);
+      if (!existsSync(sourcePath)) return sendError(res, 400, '源码路径不存在');
+      const wrappers = loadGenConfig(project)?.wrappers;
+      const scan = genPipeline.collectEndpoints(sourcePath, wrappers);
+      const endpoints = scan.endpoints;
+      const fingerprint = createHash('sha256').update(JSON.stringify(endpoints)).digest('hex');
+      if (body.fingerprint !== fingerprint) return sendError(res, 409, '源码接口列表已变化，请重新扫描并选择');
+      const chosen = selected.map(index => endpoints[index]).filter(Boolean);
+      if (!chosen.length || chosen.length !== selected.length) return sendError(res, 400, '接口列表已变化，请重新扫描后选择');
+      const existing = loadRegistry(project, moduleName);
+      const overwritten = chosen.filter(endpoint => (existing?.apis || []).some(api => api.method === endpoint.httpMethod && api.path === endpoint.path)).length;
+      const registry = genPipeline.planRegistryUpdate(project, moduleName, chosen, existing, []).registry;
+      if (body.description) registry.description = String(body.description).trim();
+      const sourceBaseDir = statSync(sourcePath).isFile() ? path.dirname(sourcePath) : sourcePath;
+      registry.sourceFiles = genPipeline.hashSourceFiles(scan.controllerFiles, sourceBaseDir);
+      registry.lastSyncedAt = new Date().toISOString();
+      const collectedEnums = javaParser.collectReferencedEnums(chosen, sourcePath);
+      if (collectedEnums.length) {
+        const sharedDir = path.join(APIS_DIR, project, '_shared');
+        mkdirSync(sharedDir, { recursive: true });
+        for (const enumDef of collectedEnums) writeFileSync(path.join(sharedDir, `${enumDef.name}.json`), JSON.stringify(enumDef, null, 2), 'utf-8');
+        registry.enumRefs = [...new Set([...(registry.enumRefs || []), ...collectedEnums.map(item => item.name)])].sort();
+      }
+      mkdirSync(path.join(APIS_DIR, project), { recursive: true });
+      writeFileSync(path.join(APIS_DIR, project, `${moduleName}.json`), JSON.stringify(registry, null, 2) + '\n', 'utf-8');
+      const built = skillBuilder.buildModuleFiles(project, moduleName, registry);
+      if (!built.success) return sendError(res, 500, built.message || 'Skill 构建失败');
+      routing.updateAnycliRouting(registry.description || `${moduleName} 模块`, registry.module);
+      skillDocs.generateSkillDocs({ quiet: true });
+      return sendJson(res, 200, { success: true, data: { project, module: moduleName, added: chosen.length - overwritten, overwritten, total: registry.apis.length, message: built.message } });
+    } catch (err) { return sendError(res, 400, err.message); }
   }
 
   // ── Portal data ──
@@ -608,7 +954,6 @@ async function handleApi(req, res, url) {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename="${zipName}"`,
         'Content-Length': zipBuffer.length,
-        'Access-Control-Allow-Origin': '*',
       });
       return res.end(zipBuffer);
     } catch (err) {
@@ -807,6 +1152,11 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
   try {
+    const origin = req.headers.origin;
+    const host = req.headers.host || '';
+    if (origin && (origin !== `http://${host}` || !/^(localhost|127\.0\.0\.1):\d+$/.test(host))) {
+      return sendError(res, 403, '仅允许本地工作台页面访问');
+    }
     if (url.pathname.startsWith('/api/')) {
       return await handleApi(req, res, url);
     }
@@ -817,7 +1167,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  🔧 CLI-Anything-X Editor`);
   console.log(`  ─────────────────────────────────`);
   console.log(`  Portal:       http://localhost:${PORT}/`);

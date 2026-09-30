@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CLI-Anything-X Editor</title>
+  <title>CLI-Anything-X 本地工作台</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%234257E0' d='M12 2l8.66 5v10L12 22l-8.66-5V7z'/%3E%3C/svg%3E">
   <script>
     document.documentElement.setAttribute('data-theme', localStorage.getItem('anycli-editor-theme') === 'dark' ? 'dark' : 'light');
@@ -21,7 +21,7 @@
     <!-- ═══════════ 顶部工具栏 ═══════════ -->
     <header id="toolbar">
       <div class="toolbar-left">
-        <span class="app-logo"><span class="logo-mark">⬡</span><b>CLI-Anything-X</b><span class="logo-sub">Editor</span></span>
+        <span class="app-logo"><span class="logo-mark">⬡</span><b>CLI-Anything-X</b><span class="logo-sub">工作台</span></span>
         <div class="toolbar-search">
           <svg class="search-glyph" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
           <input type="text" x-model="search" @keydown.escape="search = ''" placeholder="搜索技能 / 流程…" x-ref="searchInput">
@@ -29,6 +29,17 @@
         </div>
       </div>
       <div class="toolbar-right">
+        <span class="workspace-label" x-show="workbench.workspace" x-text="workbench.workspace"></span>
+        <select class="wb-profile-select" x-model="workbench.activeProfile" @change="switchProfile()" aria-label="切换 Profile">
+          <template x-for="profile in workbench.profiles" :key="profile.name">
+            <option :value="profile.name" x-text="`${profile.name} · ${profile.env}`"></option>
+          </template>
+        </select>
+        <span class="wb-auth-status" :class="workbench.current?.credentialConfigured ? 'is-logged-in' : 'is-logged-out'" x-text="workbench.current?.credentialConfigured ? '已授权' : '未授权'"></span>
+        <button class="btn-secondary" @click="loginCurrentProfile()" :disabled="authBusy" x-text="authBusy ? '等待授权…' : (workbench.current?.credentialConfigured ? '重新授权' : '授权登录')"></button>
+        <button class="btn-secondary" @click="openProfileSettings()">环境配置</button>
+        <button class="btn-primary" @click="openDialog('project')">接入项目</button>
+        <button class="btn-primary" @click="openDialog('scan')">获取接口</button>
         <button class="btn-icon" title="切换浅色 / 深色主题" @click="darkMode = !darkMode" x-text="darkMode ? '☀' : '☾'"></button>
       </div>
     </header>
@@ -113,19 +124,134 @@
       <!-- 加载中 -->
       <div class="empty-inline" x-show="loading" x-cloak style="max-width:980px">加载中…</div>
     </div>
+
+    <div class="wb-modal-backdrop" x-show="dialog" x-cloak @click.self="dialog = null">
+      <section class="wb-modal" x-show="dialog === 'profile'" x-cloak>
+        <div class="wb-modal-head"><div><h2>环境配置</h2><p>修改当前 Profile 的环境和连接地址</p></div><button class="btn-icon" @click="dialog = null">×</button></div>
+        <div class="wb-form-grid">
+          <label>Profile<select x-model="profileForm.name"><template x-for="profile in workbench.profiles" :key="profile.name"><option :value="profile.name" x-text="profile.name"></option></template></select></label>
+          <label>环境<select x-model="profileForm.env"><option value="test">测试环境</option><option value="prod">正式环境</option><option value="dev">开发环境</option></select></label>
+          <label class="wb-wide">网关地址<input x-model="profileForm.gatewayUrl" placeholder="https://api.example.com"></label>
+          <label class="wb-wide">登录页地址<input x-model="profileForm.loginUrl" placeholder="https://login.example.com"></label>
+          <label>授权方式<select x-model="profileForm.authType"><option value="session-id">Session ID</option><option value="bearer-token">Bearer Token</option></select></label>
+          <div class="wb-note wb-wide">凭证不会在页面展示。当前：<span x-text="profileForm.credentialConfigured ? '已配置' : '未登录'"></span>。授权登录会写入当前 Profile。</div>
+          <div class="wb-wide wb-login-link" x-show="authUrl"><a :href="authUrl" target="_blank" rel="noreferrer">浏览器未打开？点击此处继续授权</a></div>
+        </div>
+        <div class="wb-modal-actions"><button class="btn-secondary" @click="dialog = 'new-profile'">新建 Profile</button><button class="btn-secondary" @click="dialog = null">取消</button><button class="btn-primary" @click="saveProfile()" :disabled="busy">保存配置</button></div>
+      </section>
+
+      <section class="wb-modal" x-show="dialog === 'new-profile'" x-cloak>
+        <div class="wb-modal-head"><div><h2>新建 Profile</h2><p>凭证不会从其他 Profile 复制</p></div><button class="btn-icon" @click="dialog = 'profile'">×</button></div>
+        <div class="wb-form-grid">
+          <label>Profile 名称<input x-model="newProfileForm.name" placeholder="test-main"></label>
+          <label>环境<select x-model="newProfileForm.env"><option value="test">测试环境</option><option value="prod">正式环境</option><option value="dev">开发环境</option></select></label>
+          <label class="wb-wide">网关地址<input x-model="newProfileForm.gatewayUrl" placeholder="https://api.example.com"></label>
+          <label class="wb-wide">登录页地址<input x-model="newProfileForm.loginUrl" placeholder="https://login.example.com"></label>
+        </div>
+        <div class="wb-modal-actions"><button class="btn-secondary" @click="dialog = 'profile'">返回</button><button class="btn-primary" @click="createProfile()" :disabled="busy">创建</button></div>
+      </section>
+
+      <section class="wb-modal wb-modal-wide" x-show="dialog === 'project'" x-cloak>
+        <div class="wb-modal-head"><div><h2 x-text="editingProject ? `编辑项目：${editingProject}` : '接入项目'"></h2><p>将项目连接配置写入当前 Profile</p></div><button class="btn-icon" @click="dialog = null">×</button></div>
+        <div class="wb-projects-section">
+          <h3>当前 Profile 的项目配置</h3>
+          <div class="wb-project-list" x-show="configuredProjects.length">
+            <template x-for="item in configuredProjects" :key="item[0]">
+              <article class="wb-project-card">
+                <div class="wb-project-summary">
+                  <b x-text="item[0]"></b>
+                  <span>前缀：<code x-text="item[1].prefix || '未设置'"></code></span>
+                  <span>网关：<code x-text="item[1].baseUrl || '使用 Profile 网关'"></code></span>
+                  <span>额外请求头：<code x-text="Object.keys(item[1].extraHeaders || {}).length ? JSON.stringify(item[1].extraHeaders) : '无'"></code></span>
+                  <span>路径变量：<code x-text="Object.keys(item[1].pathVariables || {}).length ? JSON.stringify(item[1].pathVariables) : '无'"></code></span>
+                </div>
+                <button class="btn-secondary" @click="editProject(item[0], item[1])">编辑配置</button>
+              </article>
+            </template>
+          </div>
+          <div class="wb-note" x-show="!configuredProjects.length">当前 Profile 还没有接入项目。</div>
+        </div>
+        <div class="wb-form-grid">
+          <label>项目标识<input x-model="projectForm.name" placeholder="demo" :readonly="!!editingProject"></label>
+          <label>请求前缀<input x-model="projectForm.prefix" placeholder="demo-service"></label>
+          <label class="wb-wide">独立网关（可选）<input x-model="projectForm.baseUrl" placeholder="留空则使用当前 Profile 网关"></label>
+          <label class="wb-wide">额外请求头（JSON，可选）<textarea x-model="projectForm.extraHeaders" rows="3" placeholder='{"x-tenant-id":"demo"}'></textarea></label>
+        </div>
+        <div class="wb-modal-actions">
+          <button class="btn-secondary" x-show="editingProject" @click="editingProject = ''; projectForm = { name: '', prefix: '', baseUrl: '', extraHeaders: '' }">取消编辑</button>
+          <button class="btn-secondary" @click="dialog = null">关闭</button>
+          <button class="btn-primary" @click="createProject()" :disabled="busy || !projectForm.name"> <span x-text="editingProject ? '更新项目配置' : '接入新项目'"></span></button>
+        </div>
+      </section>
+
+      <section class="wb-modal wb-modal-wide" x-show="dialog === 'scan'" x-cloak>
+        <div class="wb-modal-head"><div><h2>扫描 Java 接口</h2><p>扫描本机 Controller 源码，选择接口写入注册表并生成 Skill</p></div><button class="btn-icon" @click="dialog = null">×</button></div>
+        <div class="wb-form-grid wb-scan-fields">
+          <label>项目<select x-model="scanForm.project" @change="changeScanProject()"><template x-for="p in workbench.current?.projects ? Object.keys(workbench.current.projects) : []" :key="p"><option :value="p" x-text="p"></option></template></select></label>
+          <label>模块名
+            <select x-model="scanModuleChoice" @change="selectScanModule()">
+              <option value="">选择已有模块，或新建模块</option>
+              <template x-for="module in scanModules" :key="module.name"><option :value="module.name" x-text="`${module.name} · ${module.apiCount} 个接口`"></option></template>
+              <option value="__custom__">＋ 自定义模块名</option>
+            </select>
+            <input x-show="scanModuleChoice === '__custom__'" x-model="scanForm.module" placeholder="输入新模块名">
+          </label>
+          <label class="wb-wide">Java 源码目录或 Controller 文件<input x-model="scanForm.sourcePath" placeholder="C:\\code\\service\\src\\main\\java"></label>
+          <label class="wb-wide">Skill 描述<input x-model="scanForm.description" placeholder="订单模块接口能力"></label>
+        </div>
+        <div class="wb-modal-actions wb-actions-left"><button class="btn-primary" @click="scanApis()" :disabled="busy || !scanForm.project || !scanForm.module || !scanForm.sourcePath">扫描并预览</button><span class="wb-note" x-text="scanResult ? `${scanResult.controllerCount} 个 Controller，${scanResult.endpoints.length} 个接口：${scanResult.endpoints.filter(e => !e.existing).length} 个新增，${scanResult.endpoints.filter(e => e.existing).length} 个已存在` : ''"></span></div>
+        <div class="wb-scan-list" x-show="scanResult" x-cloak>
+          <div class="wb-scan-toolbar"><label><input type="checkbox" @change="toggleAll($event.target.checked)"> 全选（包含已存在接口）</label><span>已选 <b x-text="selectedEndpointIndexes.length"></b> 项：<b x-text="selectedNewCount"></b> 个新增，<b class="wb-overwrite-text" x-text="selectedOverwriteCount"></b> 个覆盖更新</span></div>
+          <template x-for="endpoint in (scanResult?.endpoints || [])" :key="endpoint.index">
+            <label class="wb-endpoint-row" :class="{ 'is-existing': endpoint.existing }">
+              <input type="checkbox" :value="endpoint.index" x-model="selectedEndpointIndexes">
+              <span class="wb-method" :class="'m-' + endpoint.method.toLowerCase()" x-text="endpoint.method"></span>
+              <span class="wb-endpoint-main"><b x-text="endpoint.path"></b><small><span x-text="`${endpoint.summary} · ${endpoint.controller}`"></span><em class="wb-api-state" :class="endpoint.existing ? 'is-overwrite' : 'is-new'" x-text="endpoint.existing ? '已存在，勾选将覆盖更新' : '新增接口'"></em></small></span>
+            </label>
+          </template>
+        </div>
+        <div class="wb-modal-actions"><button class="btn-secondary" @click="dialog = null">关闭</button><button class="btn-primary" @click="commitApis()" :disabled="busy || !selectedEndpointIndexes.length" x-text="selectedOverwriteCount ? `添加 ${selectedNewCount} 项并覆盖更新 ${selectedOverwriteCount} 项` : `添加 ${selectedNewCount} 个接口到 Skill`"></button></div>
+      </section>
+    </div>
+
+    <div class="wb-toast" x-show="toast" x-cloak x-text="toast"></div>
   </div>
 
   <script>
     function portal() {
       return {
         data: { projects: [], skills: [], flows: [] },
+        workbench: { profiles: [], projects: {}, current: {}, activeProfile: '', workspace: '' },
         search: '',
         tab: 'skills',
         darkMode: localStorage.getItem('anycli-editor-theme') === 'dark',
         loading: true,
+        dialog: null,
+        busy: false,
+        authBusy: false,
+        authUrl: '',
+        toast: '',
+        profileForm: { name: '', env: 'prod', gatewayUrl: '', loginUrl: '', authType: 'session-id', credentialConfigured: false },
+        newProfileForm: { name: '', env: 'test', gatewayUrl: '', loginUrl: '' },
+        projectForm: { name: '', prefix: '', baseUrl: '', extraHeaders: '' },
+        editingProject: '',
+        scanForm: { project: '', module: '', sourcePath: '', description: '' },
+        scanModules: [],
+        scanModuleChoice: '',
+        scanResult: null,
+        selectedEndpointIndexes: [],
 
         get totalApis() {
           return (this.data.skills || []).reduce((sum, s) => sum + (s.apiCount || 0), 0);
+        },
+        get configuredProjects() {
+          return Object.entries(this.workbench.current?.projects || {});
+        },
+        get selectedNewCount() {
+          return (this.scanResult?.endpoints || []).filter(e => !e.existing && this.selectedEndpointIndexes.includes(String(e.index))).length;
+        },
+        get selectedOverwriteCount() {
+          return (this.scanResult?.endpoints || []).filter(e => e.existing && this.selectedEndpointIndexes.includes(String(e.index))).length;
         },
         get filteredSkills() {
           const q = this.search.toLowerCase();
@@ -157,14 +283,174 @@
             localStorage.setItem('anycli-editor-theme', v ? 'dark' : 'light');
             document.documentElement.setAttribute('data-theme', v ? 'dark' : 'light');
           });
-          try {
-            const resp = await fetch('/api/portal');
-            const json = await resp.json();
-            if (json.success) this.data = json.data;
-          } catch (err) {
-            console.error('Failed to load portal data:', err);
-          }
+          await this.refreshWorkbench();
           this.loading = false;
+        },
+        async request(url, options = {}) {
+          const resp = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...options });
+          const json = await resp.json();
+          if (!resp.ok || !json.success) throw new Error(json.error || '操作失败');
+          return json.data;
+        },
+        async refreshWorkbench() {
+          try {
+            const [portal, wb] = await Promise.all([this.request('/api/portal'), this.request('/api/workbench')]);
+            this.data = portal;
+            this.workbench = wb;
+            this.workbench.activeProfile = wb.activeProfile;
+          } catch (err) { this.notify(err.message); }
+        },
+        async loginCurrentProfile() {
+          const popup = window.open('about:blank', '_blank');
+          this.authBusy = true;
+          this.authUrl = '';
+          try {
+            const started = await this.request('/api/auth/login', { method: 'POST', body: '{}' });
+            this.authUrl = started.authUrl;
+            if (popup) popup.location.href = started.authUrl;
+            else {
+              this.openProfileSettings();
+              this.notify('浏览器阻止了弹窗，请在环境配置中点击授权链接');
+            }
+            for (let i = 0; i < 120; i++) {
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              const status = await this.request('/api/auth/login/status');
+              if (status.status === 'complete' && status.profileName === started.profileName) {
+                await this.refreshWorkbench();
+                if (this.profileForm.name === started.profileName) this.profileForm.credentialConfigured = true;
+                this.notify(`授权成功，凭证已保存到 ${started.profileName}`);
+                this.authUrl = '';
+                return;
+              }
+              if (status.status === 'failed') throw new Error(status.error || '授权失败');
+            }
+            throw new Error('等待授权超时，请重新发起登录');
+          } catch (err) {
+            if (popup && !popup.closed) popup.close();
+            this.notify(err.message);
+          } finally { this.authBusy = false; }
+        },
+        notify(message) {
+          this.toast = message;
+          setTimeout(() => { this.toast = ''; }, 4500);
+        },
+        openDialog(type) {
+          this.dialog = type;
+          if (type === 'project') {
+            this.editingProject = '';
+            this.projectForm = { name: '', prefix: '', baseUrl: '', extraHeaders: '' };
+          }
+          if (type === 'scan') {
+            const projects = Object.keys(this.workbench.current?.projects || {});
+            this.scanForm = { project: projects[0] || '', module: '', sourcePath: '', description: '' };
+            this.scanModuleChoice = '';
+            this.scanModules = [];
+            this.scanResult = null;
+            this.selectedEndpointIndexes = [];
+            if (this.scanForm.project) this.loadProjectModules(this.scanForm.project);
+          }
+        },
+        editProject(name, config) {
+          this.editingProject = name;
+          this.projectForm = { name, prefix: config.prefix || '', baseUrl: config.baseUrl || '', extraHeaders: JSON.stringify(config.extraHeaders || {}, null, 2) };
+        },
+        async loadProjectModules(project) {
+          this.scanModules = [];
+          this.scanModuleChoice = '';
+          this.scanForm.module = '';
+          if (!project) return;
+          try { this.scanModules = await this.request(`/api/projects/${encodeURIComponent(project)}/modules`); }
+          catch (err) { this.notify(err.message); }
+        },
+        changeScanProject() {
+          this.scanResult = null;
+          this.selectedEndpointIndexes = [];
+          this.loadProjectModules(this.scanForm.project);
+        },
+        selectScanModule() {
+          this.scanForm.module = this.scanModuleChoice === '__custom__' ? '' : this.scanModuleChoice;
+          this.scanResult = null;
+          this.selectedEndpointIndexes = [];
+        },
+        async switchProfile() {
+          try {
+            const result = await this.request('/api/profiles/use', { method: 'POST', body: JSON.stringify({ name: this.workbench.activeProfile }) });
+            this.workbench.current = result.current;
+            await this.refreshWorkbench();
+            this.notify(`已切换到 ${result.activeProfile}（${result.current.env}）`);
+          } catch (err) { this.notify(err.message); }
+        },
+        openProfileSettings() {
+          const p = this.workbench.current || {};
+          this.profileForm = { name: p.name, env: p.env, gatewayUrl: p.gatewayUrl, loginUrl: p.loginUrl, authType: p.authType, credentialConfigured: p.credentialConfigured };
+          this.dialog = 'profile';
+        },
+        async saveProfile() {
+          this.busy = true;
+          try {
+            const { name, env, gatewayUrl, loginUrl, authType } = this.profileForm;
+            const body = { env, gatewayUrl, loginUrl, authType };
+            const result = await this.request(`/api/profiles/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify(body) });
+            this.workbench.current = result;
+            this.dialog = null;
+            await this.refreshWorkbench();
+            this.notify('环境配置已保存');
+          } catch (err) { this.notify(err.message); }
+          finally { this.busy = false; }
+        },
+        async createProfile() {
+          this.busy = true;
+          try {
+            const result = await this.request('/api/profiles', { method: 'POST', body: JSON.stringify(this.newProfileForm) });
+            await this.request('/api/profiles/use', { method: 'POST', body: JSON.stringify({ name: result.name }) });
+            this.dialog = null;
+            this.newProfileForm = { name: '', env: 'test', gatewayUrl: '', loginUrl: '' };
+            await this.refreshWorkbench();
+            this.notify(`已创建并切换到 ${result.name}`);
+          } catch (err) { this.notify(err.message); }
+          finally { this.busy = false; }
+        },
+        async createProject() {
+          this.busy = true;
+          try {
+            const body = { ...this.projectForm };
+            body.extraHeaders = body.extraHeaders.trim() ? JSON.parse(body.extraHeaders) : {};
+            const editing = Boolean(this.editingProject);
+            const route = editing ? `/api/projects/${encodeURIComponent(this.editingProject)}` : '/api/projects';
+            await this.request(route, { method: editing ? 'PUT' : 'POST', body: JSON.stringify(body) });
+            await this.refreshWorkbench();
+            if (editing) {
+              this.projectForm = { ...this.projectForm, extraHeaders: JSON.stringify(body.extraHeaders, null, 2) };
+              this.notify('项目配置已更新');
+            } else {
+              this.dialog = null;
+              this.projectForm = { name: '', prefix: '', baseUrl: '', extraHeaders: '' };
+              this.notify('项目已接入当前 Profile');
+            }
+          } catch (err) { this.notify(err instanceof SyntaxError ? '额外请求头必须是合法 JSON' : err.message); }
+          finally { this.busy = false; }
+        },
+        async scanApis() {
+          this.busy = true;
+          try {
+            this.scanResult = await this.request('/api/ingest/scan', { method: 'POST', body: JSON.stringify(this.scanForm) });
+            this.selectedEndpointIndexes = this.scanResult.endpoints.filter(e => !e.existing).map(e => String(e.index));
+          } catch (err) { this.scanResult = null; this.notify(err.message); }
+          finally { this.busy = false; }
+        },
+        toggleAll(checked) {
+          this.selectedEndpointIndexes = checked ? (this.scanResult?.endpoints || []).map(e => String(e.index)) : [];
+        },
+        async commitApis() {
+          this.busy = true;
+          try {
+            const result = await this.request('/api/ingest/commit', { method: 'POST', body: JSON.stringify({ ...this.scanForm, fingerprint: this.scanResult.fingerprint, selected: this.selectedEndpointIndexes }) });
+            this.dialog = null;
+            this.scanResult = null;
+            await this.refreshWorkbench();
+            this.notify(`${result.project}/${result.module}：新增 ${result.added} 个，覆盖更新 ${result.overwritten} 个，当前共 ${result.total} 个接口`);
+          } catch (err) { this.notify(err.message); }
+          finally { this.busy = false; }
         }
       };
     }

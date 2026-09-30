@@ -5,11 +5,21 @@
 ## 启动
 
 ```bash
-anycli edit              # 默认 http://localhost:3200
-anycli edit -p 8080      # 自定义端口
+anycli workbench         # 默认 http://127.0.0.1:3200
+anycli workbench -p 8080 # 自定义端口
+# 兼容旧命令
+anycli edit
 ```
 
 启动后自动打开浏览器。按 Ctrl+C 退出。
+
+服务仅监听本机回环地址，不对局域网开放。
+
+## 本地工作台
+
+门户顶部可以查看并切换 Profile；环境配置可修改环境、网关、登录页和授权方式，凭证只显示是否已配置。点击「授权登录」会按当前 Profile 的登录地址和授权方式打开浏览器，回调凭证只保存到发起登录时的 Profile。也可以创建 Profile；项目弹窗列出当前 Profile 已有配置，并支持编辑请求前缀、独立网关和额外请求头。
+
+「获取接口」通过本机路径扫描 Java Controller。选择项目后可选择已有模块或输入新模块名；预览会区分新增接口和已存在接口，已存在接口默认不勾选，勾选后会覆盖更新解析字段并保留人工维护字段。确认后更新 `apis/{project}/{module}.json`、构建 Skill、更新路由表和技能总览页。扫描与写入都发生在本地 Workspace。
 
 ## 门户首页
 
@@ -77,6 +87,17 @@ anycli edit -p 8080      # 自定义端口
 | 端点 | 方法 | 用途 |
 |------|------|------|
 | `/api/portal` | GET | 门户数据（skills + flows + projects） |
+| `/api/workbench` | GET | 当前 Workspace、Profile 和脱敏配置状态 |
+| `/api/auth/login` | POST | 为当前 Profile 启动浏览器授权回调 |
+| `/api/auth/login/status` | GET | 查询本次授权状态，不返回凭证 |
+| `/api/profiles` | POST | 创建 Profile |
+| `/api/profiles/use` | POST | 切换当前 Profile |
+| `/api/profiles/:name` | PUT | 更新 Profile 环境与连接设置 |
+| `/api/projects` | POST | 接入项目到当前 Profile |
+| `/api/projects/:name` | PUT | 更新当前 Profile 的项目配置 |
+| `/api/projects/:name/modules` | GET | 获取项目现有模块选项 |
+| `/api/ingest/scan` | POST | 扫描 Java Controller 并预览接口 |
+| `/api/ingest/commit` | POST | 将选中接口写入注册表并构建 Skill |
 | `/api/skills` | GET | 列出所有模块注册表 |
 | `/api/skill-catalog` | GET | Flow 编辑器按项目/模块/API 展示的接口目录（独立 Flow 编辑器服务提供） |
 | `/api/skills/:p/:m` | GET | 获取模块注册表 + 共享枚举 |

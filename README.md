@@ -35,7 +35,10 @@ anycli auth login           # 选择授权方式（session-id / bearer-token）�
 anycli init cli-anything-x   # 一键接入新业务系统（配置 + 注册表 + Skill 一步到位）
 anycli skill install        # 安装 Skill 到 ~/.agents/skills/
 anycli request cli-anything-x POST /api/example --body '{}'  # 调用业务接口
+anycli workbench            # 打开本地 Web 工作台
 ```
+
+本地工作台统一管理 Profile/环境切换、项目配置、Java Controller 接口扫描与勾选入库，并可继续进入 Skill 和 Flow 编辑器。兼容命令 `anycli edit` 仍可使用；可通过 `-p, --port` 指定端口。
 
 > 已有项目添加接口：`anycli gen`；已有项目添加 Profile 配置：`anycli config add-project`
 
